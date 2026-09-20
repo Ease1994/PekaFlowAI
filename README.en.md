@@ -120,7 +120,7 @@ cd PekaFlowAI
 bash deploy/pekaflow.sh upgrade
 ```
 
-Add `--skip-git` if you already pulled. The script fast-forwards `master`, rebuilds the Agent jar when the fingerprint drifts, then runs `docker compose up -d --build`.
+Add `--skip-git` if you already pulled. The script fast-forwards `master` and runs `docker compose up -d --build`. The host does not need Python or a JDK.
 
 ### Step 1 · Back up first (recommended)
 

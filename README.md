@@ -120,7 +120,7 @@ cd PekaFlowAI
 bash deploy/pekaflow.sh upgrade
 ```
 
-代码已经拉过时加 `--skip-git`。脚本会快进 `master`、必要时重编 Agent jar、再 `docker compose up -d --build`。
+代码已经拉过时加 `--skip-git`。脚本会快进 `master`，再 `docker compose up -d --build`。宿主机不需要 Python 或 JDK。
 
 ### 步骤 1 · 建议先备份
 
