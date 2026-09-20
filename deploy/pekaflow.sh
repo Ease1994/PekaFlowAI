@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# PekaFlowAI 一键部署 / 升级。宿主机只需要 Git 和 Docker Compose，不依赖 Python / JDK。
+# PekaFlowAI 一键部署 / 升级。宿主机只需要 Git 和 docker-compose，不依赖 Python / JDK。
 #
 # 第一次：没有 .env 就复制试用配置，构建并拉起完整栈。
 # 升级：快进拉取 master，重建镜像。绝不 docker compose down -v，绝不覆盖已有 .env。
@@ -70,15 +70,16 @@ compose() {
 
 
 detect_compose() {
-  if docker compose version >/dev/null 2>&1; then
-    COMPOSE_CMD=(docker compose)
-    return
-  fi
+  # 不少装机是独立二进制 docker-compose（如 Anolis），docker compose 子命令会报错。
   if command -v docker-compose >/dev/null 2>&1 && docker-compose version >/dev/null 2>&1; then
     COMPOSE_CMD=(docker-compose)
     return
   fi
-  die "需要 Docker Compose v2（docker compose）"
+  if docker compose version >/dev/null 2>&1; then
+    COMPOSE_CMD=(docker compose)
+    return
+  fi
+  die "需要 docker-compose（Compose v2）"
 }
 
 
@@ -92,6 +93,7 @@ ensure_docker() {
   need_cmd docker
   docker info >/dev/null 2>&1 || die "Docker 守护进程没起来，先启动 Docker"
   detect_compose
+  log "使用 ${COMPOSE_CMD[*]}"
 }
 
 
