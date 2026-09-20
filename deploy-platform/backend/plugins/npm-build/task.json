@@ -1,0 +1,37 @@
+{
+  "name": "npm-build",
+  "display_name": "npm 构建",
+  "category": "build",
+  "version": "1.0.3",
+  "language": "python",
+  "entrypoint": "python3 task.py",
+  "description": "在代码目录执行 npm ci / npm run。在前端 Node 项目构建时用。不是 Python 脚本步骤。",
+  "config_schema": {
+    "fields": [
+      {
+        "key": "install",
+        "label": "先安装依赖",
+        "type": "checkbox",
+        "default": true,
+        "help": "有 package-lock.json 时用 npm ci，否则 npm install"
+      },
+      {
+        "key": "script",
+        "label": "npm script",
+        "type": "text",
+        "required": true,
+        "default": "build",
+        "placeholder": "build",
+        "help": "对应 package.json 里 scripts 的名字，实际执行 npm run <script>"
+      },
+      {
+        "key": "nodeHome",
+        "label": "Node.js 安装目录",
+        "type": "text",
+        "default": "",
+        "placeholder": "例如 /usr/local/nodejs，留空则自动查找",
+        "help": "这台构建机上 Node 的安装根或 npm 所在目录。填了就用这一份。留空才扫 PATH、NODEJS_HOME、/usr/local/nodejs"
+      }
+    ]
+  }
+}

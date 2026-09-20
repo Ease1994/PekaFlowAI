@@ -1,0 +1,127 @@
+{
+  "name": "msbuild-build",
+  "display_name": "MSBuild 编译",
+  "category": "build",
+  "version": "1.0.16",
+  "language": "python",
+  "entrypoint": "python3 task.py",
+  "description": "在 Windows 构建机上用 MSBuild 编译 .NET Framework 项目，Web 项目可产出站点目录。在 Framework / 老 Web 项目时用。.NET Core 请用 dotnet-publish。",
+  "config_schema": {
+    "fields": [
+      {
+        "key": "solution",
+        "label": "要编译的项目",
+        "type": "text",
+        "required": true,
+        "placeholder": "Server\\Web.csproj",
+        "help": "填要 msbuild 的那个 .csproj。Web 方式必须填网站启动项目，不能填 .sln——否则解决方案里的类库也会被套上网站目标，出现 MSB4057（该项目中不存在目标 ResolveReferences）"
+      },
+      {
+        "key": "restoreSolution",
+        "label": "还原用的解决方案",
+        "type": "text",
+        "default": "",
+        "placeholder": "Web.sln",
+        "help": "nuget restore 用这个 .sln，和现有 bat 一样，整份只还原一次。留空则还原「要编译的项目」本身。若 sln 里有旧版 .nuget\\NuGet.exe，会先生成一份只含 csproj 的临时 sln 再还原，避免 MSB4025"
+      },
+      {
+        "key": "mode",
+        "label": "编译方式",
+        "type": "radio",
+        "default": "web",
+        "options": [
+          {"label": "Web 项目（产出可部署站点目录）", "value": "web"},
+          {"label": "普通编译（产物留在各自 bin 下）", "value": "build"}
+        ],
+        "help": "选「Web 项目」时必须填网站 .csproj。会先按 VS 那样 Build（连带编项目引用），再拷站点目录；不会把 OutDir 套到类库上。选「普通编译」时 dll 留在项目 bin（或下方「类库输出路径」），不会写到 _publish"
+      },
+      {
+        "key": "outputDir",
+        "label": "输出目录",
+        "type": "text",
+        "default": "_publish",
+        "placeholder": "_publish",
+        "help": "仅「Web 项目」使用：站点拷贝目标，相对代码目录；「提取增量发布包」的清单相对这个目录。「普通编译」不读此项"
+      },
+      {
+        "key": "outputPath",
+        "label": "类库输出路径",
+        "type": "text",
+        "default": "",
+        "placeholder": "bin\\Debug\\netstandard2.0\\",
+        "help": "仅「普通编译」：对应 msbuild /p:OutputPath。这是 dll 拷到哪，不是编哪个框架。IApplications 现场 bat 拷到 bin\\Debug\\netstandard2.0\\，但真正编的是后面的 net4.5.2"
+      },
+      {
+        "key": "targetFramework",
+        "label": "目标框架",
+        "type": "text",
+        "default": "",
+        "placeholder": "net4.5.2",
+        "help": "对应 /p:TargetFramework。IApplications 是 netstandard2.0;net40 多目标，只编 netstandard2.0 会缺 ResponseBase / EDI。对齐现场 bat 请填 net4.5.2（bat 里写了两次，后一次生效）。留空则编 csproj 里全部框架"
+      },
+      {
+        "key": "configuration",
+        "label": "配置",
+        "type": "select",
+        "default": "Release",
+        "options": [
+          {"label": "Release", "value": "Release"},
+          {"label": "Debug", "value": "Debug"}
+        ]
+      },
+      {
+        "key": "platform",
+        "label": "平台",
+        "type": "text",
+        "default": "Any CPU",
+        "placeholder": "Any CPU"
+      },
+      {
+        "key": "restore",
+        "label": "编译前还原 NuGet 包",
+        "type": "switch",
+        "default": true,
+        "help": "用 nuget.exe 按解决方案还原一次（packages.config）。SDK / PackageReference 项目在编译时再 /restore，生成 project.assets.json。老项目把包提交进仓库的可关掉"
+      },
+      {
+        "key": "nugetSources",
+        "label": "NuGet 源",
+        "type": "textarea",
+        "default": "https://api.nuget.org/v3/index.json\nhttps://nuget.org/api/v2/",
+        "placeholder": "https://api.nuget.org/v3/index.json\nhttps://nuget.org/api/v2/",
+        "help": "还原时使用的源，等价于 nuget restore -source。默认已填官方源和公司源，可改。一行一个，也可用分号写在一行"
+      },
+      {
+        "key": "clean",
+        "label": "先清空输出目录",
+        "type": "switch",
+        "default": true,
+        "help": "避免上一次的残留文件混进这次的增量包"
+      },
+      {
+        "key": "nugetPath",
+        "label": "NuGet 路径",
+        "type": "text",
+        "default": "",
+        "placeholder": "D:\\b2ccode\\nuget",
+        "help": "nuget.exe 的完整路径。留空时先查 PATH，再沿解决方案目录往上找 nuget.exe，并尝试 D:\\b2ccode\\nuget"
+      },
+      {
+        "key": "msbuildPath",
+        "label": "MSBuild 路径",
+        "type": "text",
+        "default": "",
+        "placeholder": "留空自动探测",
+        "help": "留空时依次尝试 vswhere、VS 各版本安装目录、.NET Framework 自带的 MSBuild"
+      },
+      {
+        "key": "extraArgs",
+        "label": "附加参数",
+        "type": "text",
+        "default": "",
+        "placeholder": "/p:DefineConstants=PROD /m",
+        "help": "追加到 msbuild。允许 /m、/p:DefineConstants；不能写 /t:Exec 或 /p:OutDir"
+      }
+    ]
+  }
+}

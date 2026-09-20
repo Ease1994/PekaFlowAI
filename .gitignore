@@ -1,0 +1,63 @@
+# ===== 依赖与虚拟环境 =====
+node_modules/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+*.egg-info/
+.eggs/
+
+# ===== 前端构建产物 =====
+dist/
+build/
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
+vite.config.js.timestamp-*.mjs
+vite.config.ts.timestamp-*.mjs
+
+# ===== Agent 编译中间产物（保留 deploy-agent.jar 便于下发）=====
+deploy-platform/backend/agent-java/out/
+deploy-platform/backend/agent-go/
+
+deploy-platform/backend/data/plugin-packages/
+# 对话框拖进来待下发的文件，纯运行时数据
+deploy-platform/backend/data/chat-uploads/
+# 对话气泡里发出去的截图，只给本会话看
+deploy-platform/backend/data/chat-images/
+# 公共安装包（Linux JDK 等），按子目录细分；旧路径 data/jdk-linux/ 也忽略
+deploy-platform/backend/data/shared-packs/
+deploy-platform/backend/data/jdk-linux/
+# 平台设置里上传的顶栏图片，每套部署各自一份
+deploy-platform/backend/data/branding/
+# 首次启动自动生成的 JWT / AES 密钥，每套部署各不相同，进库就等于把钥匙公开
+deploy-platform/backend/data/.secrets.json
+# 本地跑脚本时落下的 sqlite
+deploy-platform/backend/data/*.db
+
+# ===== 本地参考资料，不入库 =====
+deepseek-harness-master/
+# 三万多个文件的外部仓库副本，只是拿来看的。不排掉的话，在仓库根跑一次
+# git add -A 就会把它整棵扫进提交
+openclaw-main/
+
+# ===== IDE / 系统 =====
+.idea/
+.vscode/
+.cursor/
+.workbuddy/
+*.swp
+.DS_Store
+Thumbs.db
+
+# ===== 本地开发库（勿提交）=====
+*.db
+*.db-journal
+
+# ===== 打包/备份 =====
+*.tar
+*.tar.gz
+*.zip
+deploy-platform.tar

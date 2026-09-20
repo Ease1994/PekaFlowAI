@@ -1,0 +1,146 @@
+{
+  "name": "docker-compile",
+  "display_name": "Docker 容器编译",
+  "category": "build",
+  "version": "1.0.2",
+  "language": "python",
+  "entrypoint": "python3 task.py",
+  "description": "用任意工具链镜像 docker run 编译（Node / Maven / Gradle / Go / Python / .NET 等），产物写回工作区。在只要编译、不要打业务镜像时用。打业务镜像请用 docker-build。",
+  "config_schema": {
+    "fields": [
+      {
+        "key": "toolchain",
+        "label": "工具链",
+        "type": "select",
+        "default": "custom",
+        "options": [
+          {"label": "自定义（不预置缓存）", "value": "custom"},
+          {"label": "Node.js（npm / pnpm / yarn）", "value": "node"},
+          {"label": "Java Maven", "value": "maven"},
+          {"label": "Java Gradle", "value": "gradle"},
+          {"label": "Go", "value": "go"},
+          {"label": "Python", "value": "python"},
+          {"label": ".NET", "value": "dotnet"}
+        ],
+        "help": "只决定缓存卷留空时挂哪几个命名卷。JDK / Node 版本仍由下面的基础镜像决定"
+      },
+      {
+        "key": "image",
+        "label": "基础镜像",
+        "type": "text",
+        "required": true,
+        "placeholder": "registry.example.com/base/maven:3.8-jdk8",
+        "help": "含 tag 的完整地址。换工具链就换镜像，例如 node:14-alpine、node:18-alpine、maven:3.8-jdk8、gradle:7-jdk17"
+      },
+      {
+        "key": "command",
+        "label": "编译命令",
+        "type": "textarea",
+        "required": true,
+        "rows": 3,
+        "placeholder": "mvn -B clean package -DskipTests",
+        "help": "容器内执行的命令。Node：npm i && npm run build；Java：mvn -B package 或 gradle build；Go：go build -o app ."
+      },
+      {
+        "key": "invoke",
+        "label": "执行方式",
+        "type": "select",
+        "default": "shell",
+        "options": [
+          {"label": "Shell（覆盖镜像入口，适合 && 和任意脚本）", "value": "shell"},
+          {"label": "直接传参（沿用镜像 ENTRYPOINT）", "value": "direct"}
+        ],
+        "help": "官方 Maven 镜像入口常是 mvn，用 Shell 才会按你写的整句命令跑。镜像本身就是「docker run 镜像 mvn package」这种，再选直接传参"
+      },
+      {
+        "key": "shell",
+        "label": "容器 Shell",
+        "type": "select",
+        "default": "sh",
+        "options": [
+          {"label": "sh", "value": "sh"},
+          {"label": "bash", "value": "bash"},
+          {"label": "ash", "value": "ash"}
+        ],
+        "help": "仅 Shell 执行时作为 --entrypoint。镜像里没有 bash 就保持 sh"
+      },
+      {
+        "key": "workdir",
+        "label": "容器工作目录",
+        "type": "text",
+        "default": "/code",
+        "placeholder": "/code",
+        "help": "对应 docker run -w。代码目录会挂到这个路径"
+      },
+      {
+        "key": "sourceDir",
+        "label": "代码子目录",
+        "type": "text",
+        "default": ".",
+        "placeholder": ".",
+        "help": "相对 git 检出后的 src/。多模块仓库可填子目录，例如 order-service"
+      },
+      {
+        "key": "cacheVolumes",
+        "label": "缓存卷",
+        "type": "textarea",
+        "default": "",
+        "placeholder": "maven_cache:/root/.m2\nnpm_cache:/root/.npm",
+        "help": "一行一个「卷名:容器路径」，只能是 Docker 命名卷。留空则按工具链预置：Maven=/root/.m2，Node=/root/.npm，Gradle=/root/.gradle。要额外挂 pnpm 仓库就在这里写全"
+      },
+      {
+        "key": "fileBinds",
+        "label": "文件挂载",
+        "type": "textarea",
+        "default": "",
+        "placeholder": "/data/soft/maven/conf/settings.xml:/root/.m2/settings.xml",
+        "help": "单文件，例如 Maven settings.xml、NuGet.Config。相对路径限代码目录；绝对路径必须是构建机上已有的文件。不要把密码写进 Git"
+      },
+      {
+        "key": "envs",
+        "label": "环境变量",
+        "type": "textarea",
+        "default": "",
+        "placeholder": "MAVEN_OPTS=-Xmx1g\nNODE_ENV=production\nGOPROXY=https://goproxy.cn,direct",
+        "help": "一行一个 KEY=VALUE，传给容器"
+      },
+      {
+        "key": "pull",
+        "label": "先拉取最新镜像",
+        "type": "switch",
+        "default": true,
+        "help": "打开则先 docker pull，避免构建机上的旧基础镜像把 JDK / Node 版本跑偏"
+      },
+      {
+        "key": "registryCredentialId",
+        "label": "镜像仓库凭证",
+        "type": "select",
+        "source": "credential",
+        "placeholder": "选择华为云 SWR / 阿里云 ACR 等仓库账号",
+        "help": "私有基础镜像才需要。在「凭证管理」里建账号密码，选了就不用再填下面的用户名密码。"
+      },
+      {
+        "key": "registryUser",
+        "label": "仓库用户名",
+        "type": "text",
+        "default": "",
+        "help": "未选凭证时才需要手填。留空则用构建机上已有的 docker login 状态"
+      },
+      {
+        "key": "registryPassword",
+        "label": "仓库密码 / Token",
+        "type": "password",
+        "default": "",
+        "help": "未选凭证时才需要手填"
+      },
+      {
+        "key": "extraArgs",
+        "label": "附加参数",
+        "type": "text",
+        "default": "",
+        "placeholder": "--memory=4g --cpus=2",
+        "help": "没填时默认 --memory=4g --cpus=2，避免一次编译把构建机吃光。只允许 --memory / --cpus / --user 这类资源选项，不要在这里写 -v 或 --privileged"
+      }
+    ]
+  }
+}

@@ -1,0 +1,45 @@
+# PekaFlowAI · Python 后端依赖
+# 安装: pip install -r requirements.txt
+
+# ---- Web 框架 ----
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+python-multipart==0.0.17
+
+# ---- 数据与 ORM ----
+sqlalchemy==2.0.36
+alembic==1.14.0
+pymysql==1.1.1
+aiosqlite==0.20.0
+pydantic==2.10.3
+pydantic-settings==2.6.1
+
+# ---- 认证与安全 ----
+pyjwt==2.10.1
+bcrypt==4.2.1
+cryptography==43.0.3
+ldap3==2.9.1
+pyotp==2.9.0
+qrcode==8.0
+
+# ---- 流水线编排 ----
+pyyaml==6.0.2
+croniter==3.0.3
+
+# ---- 缓存 / 消息 ----
+redis==5.2.1
+
+# ---- 日志（Elasticsearch 归档）----
+elasticsearch==8.17.0
+
+# ---- 对象存储 ----
+minio==7.2.12
+
+# ---- AI / MCP ----
+mcp==1.2.0
+openai==1.57.4
+
+# ---- 工具 ----
+pytest==8.3.4
+httpx==0.28.1
+python-dotenv==1.0.1

@@ -1,0 +1,37 @@
+{
+  "name": "python-exec",
+  "display_name": "Python 脚本",
+  "category": "exec",
+  "version": "1.0.2",
+  "language": "python",
+  "entrypoint": "python3 task.py",
+  "description": "在代码目录用本机 Python 执行一段脚本或仓库内的 .py 文件。在流水线里要跑 Python 脚本时用。不是 Node/npm 构建。",
+  "config_schema": {
+    "fields": [
+      {
+        "key": "file",
+        "label": "脚本文件",
+        "type": "text",
+        "default": "",
+        "placeholder": "相对 src/ 的路径，如 scripts/release.py",
+        "help": "仓库里要跑的 .py，相对 src/。这不是本机 Python 安装路径。留空则执行下面的脚本内容"
+      },
+      {
+        "key": "pythonHome",
+        "label": "Python 安装目录",
+        "type": "text",
+        "default": "",
+        "placeholder": "例如 /data/soft/python3，留空则自动查找",
+        "help": "这台构建机上 Python 的安装根或解释器路径。填了就用这一份。留空才扫 PATH、PYTHON_HOME、/data/soft"
+      },
+      {
+        "key": "content",
+        "label": "脚本内容",
+        "type": "code",
+        "rows": 12,
+        "placeholder": "print('hello')",
+        "help": "未填脚本文件时必填。会写到工作区临时文件再执行，不会覆盖仓库代码"
+      }
+    ]
+  }
+}

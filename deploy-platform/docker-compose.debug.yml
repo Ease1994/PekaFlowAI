@@ -1,0 +1,14 @@
+# 仅调试：把 MySQL / Redis / Elasticsearch 映射到宿主机。生产不要用。
+#
+#   docker compose -f docker-compose.yml -f docker-compose.debug.yml up -d
+#
+services:
+  mysql:
+    ports:
+      - "3306:3306"
+  redis:
+    ports:
+      - "6379:6379"
+  elasticsearch:
+    ports:
+      - "9200:9200"

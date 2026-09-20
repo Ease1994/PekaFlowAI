@@ -1,0 +1,70 @@
+{
+  "name": "service-control",
+  "display_name": "服务启停控制（Linux）",
+  "category": "deploy",
+  "version": "1.0.0",
+  "runtime": "node",
+  "language": "builtin",
+  "entrypoint": "",
+  "description": "启停指定 Linux 节点上的 systemd 服务或 Docker 容器，由节点 Agent 内置执行。在 Linux 上要开关服务时用。IIS 请用 iis-control。",
+  "config_schema": {
+    "fields": [
+      {
+        "key": "node",
+        "label": "目标节点",
+        "type": "select",
+        "source": "node",
+        "required": true,
+        "placeholder": "选择已安装节点 Agent 的 Linux 服务器",
+        "help": "在「节点管理」里注册的机器；这一步会派给它自己执行。Windows 节点请改用「IIS 启停控制」"
+      },
+      {
+        "key": "type",
+        "label": "服务类型",
+        "type": "radio",
+        "required": true,
+        "default": "systemd",
+        "options": [
+          {"label": "systemd 服务", "value": "systemd"},
+          {"label": "Docker 容器", "value": "docker"}
+        ]
+      },
+      {
+        "key": "name",
+        "label": "服务名 / 容器名",
+        "type": "text",
+        "required": true,
+        "placeholder": "如 nginx、tomcat 或容器名 web",
+        "help": "必须在节点安装时的「允许控制的服务」里声明过，否则会被节点拒绝。systemd 可以省略 .service 后缀"
+      },
+      {
+        "key": "action",
+        "label": "操作",
+        "type": "radio",
+        "required": true,
+        "default": "restart",
+        "options": [
+          {"label": "停止", "value": "stop"},
+          {"label": "启动", "value": "start"},
+          {"label": "重启", "value": "restart"},
+          {"label": "重载配置（仅 systemd）", "value": "reload"},
+          {"label": "查看状态", "value": "status"}
+        ]
+      },
+      {
+        "key": "waitSeconds",
+        "label": "等待就绪（秒）",
+        "type": "number",
+        "default": 30,
+        "help": "执行后等待状态变更的最长时间，超时视为失败。Java 应用停得慢，可以调大"
+      },
+      {
+        "key": "ignoreMissing",
+        "label": "服务不存在时跳过",
+        "type": "switch",
+        "default": false,
+        "help": "开启后，服务/容器不存在只告警不失败；日常发布建议关闭"
+      }
+    ]
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "name": "gradle-build",
+  "display_name": "Gradle 构建",
+  "category": "build",
+  "version": "1.0.4",
+  "language": "python",
+  "entrypoint": "python3 task.py",
+  "description": "在代码目录执行 Gradle 构建。在 Gradle 项目构建时用。Maven 项目请用 maven-build。",
+  "config_schema": {
+    "fields": [
+      {
+        "key": "tasks",
+        "label": "Gradle 任务",
+        "type": "text",
+        "required": true,
+        "default": "build",
+        "placeholder": "build 或 clean build",
+        "help": "会按参数列表传给 gradle，不要写管道和分号"
+      },
+      {
+        "key": "skipTests",
+        "label": "跳过测试",
+        "type": "checkbox",
+        "default": false
+      },
+      {
+        "key": "gradleHome",
+        "label": "Gradle 安装目录",
+        "type": "text",
+        "default": "",
+        "placeholder": "例如 /data/soft/gradle，留空则自动查找",
+        "help": "这台构建机上 Gradle 的安装根或 bin 目录。填了就用这一份。留空才用仓库 gradlew，再扫描 /data/soft/gradle 等"
+      },
+      {
+        "key": "javaHome",
+        "label": "JDK 安装目录",
+        "type": "text",
+        "default": "",
+        "placeholder": "例如 /data/soft/jdk17，留空则用 JAVA_HOME",
+        "help": "这台构建机上 JDK 的安装根。填了会设 JAVA_HOME。留空则沿用本机环境"
+      }
+    ]
+  }
+}

@@ -1,0 +1,64 @@
+"""git-checkout：argv + ref 白名单，token 不进 clone URL。"""
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from tests.test_plugin_deploy_safety import _load
+
+
+def test_ref_whitelist():
+    task = _load("git-checkout")
+    assert task._valid_ref("master")
+    assert task._valid_ref("feature/x-1")
+    assert task._valid_ref("a" * 7)
+    assert task._valid_ref("deadbeefcafebabe")
+    assert not task._valid_ref("$(reboot)")
+    assert not task._valid_ref("origin;rm -rf /")
+    assert not task._valid_ref("-c")
+    assert not task._valid_ref("../etc")
+    assert not task._valid_ref("")
+
+
+def test_git_finds_binary_outside_path(tmp_path, monkeypatch):
+    """Windows Git / 非 PATH 安装仍应被找到，不能只认 shutil.which。"""
+    import os
+
+    task = _load("git-checkout")
+    name = "git.exe" if os.name == "nt" else "git"
+    fake = tmp_path / name
+    fake.write_bytes(b"")
+    if os.name != "nt":
+        fake.chmod(0o755)
+    monkeypatch.setattr(task.shutil, "which", lambda *_a, **_k: None)
+    monkeypatch.setattr(task, "_git_bin_dirs", lambda: [tmp_path])
+    assert Path(task.find_git()).name == name
+
+
+def test_git_missing_explains_install(monkeypatch):
+    """本机没有 git 时，报错要能看懂该装到哪里。"""
+    task = _load("git-checkout")
+    monkeypatch.setattr(task.shutil, "which", lambda *_a, **_k: None)
+    monkeypatch.setattr(task, "_git_bin_dirs", lambda: [])
+    with pytest.raises(task.CheckoutError) as exc:
+        task.find_git()
+    assert "git" in str(exc.value).lower()
+
+
+def test_run_uses_argv_not_shell():
+    import base64
+
+    task = _load("git-checkout")
+    src = Path(task.__file__).read_text(encoding="utf-8")
+    assert "shell=True" not in src
+    assert "shell=False" in src
+    # token 不进 clone URL；GitLab git-http 要的是 Basic oauth2:token，不是 Bearer
+    assert "https://oauth2:" not in src
+    env = task._git_env("s3cret")
+    header = env["GIT_CONFIG_VALUE_0"]
+    assert header.startswith("Authorization: Basic ")
+    assert "Bearer" not in header
+    decoded = base64.b64decode(header.split()[-1]).decode("utf-8")
+    assert decoded == "oauth2:s3cret"
+    assert env["GIT_CONFIG_KEY_0"] == "http.extraHeader"

@@ -1,0 +1,8 @@
+# 前端构建上下文排除（避免把 node_modules/dist 打进镜像）
+node_modules
+dist
+.git
+.gitignore
+*.log
+.vite
+vite.config.js.timestamp-*

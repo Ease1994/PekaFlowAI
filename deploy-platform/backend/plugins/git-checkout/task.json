@@ -1,0 +1,40 @@
+{
+  "name": "git-checkout",
+  "display_name": "Git 拉取代码",
+  "category": "source",
+  "version": "1.0.6",
+  "language": "python",
+  "entrypoint": "python3 task.py",
+  "description": "从 Git 仓库拉取指定分支/Tag/Commit 到工作区 src/。在流水线开头要检出代码时用。不是编译，也不是往节点发文件。",
+  "config_schema": {
+    "fields": [
+      {
+        "key": "repoName",
+        "label": "代码库",
+        "type": "select",
+        "required": true,
+        "placeholder": "选择仓库"
+      },
+      {
+        "key": "ref",
+        "label": "分支 / Tag / Commit",
+        "type": "text",
+        "required": true,
+        "default": "master",
+        "placeholder": "如 master / v1.0.0 / commit SHA"
+      },
+      {
+        "key": "strategy",
+        "label": "拉取策略",
+        "type": "select",
+        "default": "REVERT_UPDATE",
+        "options": [
+          {"label": "Revert Update（reset 到目标版本并清理未跟踪文件）", "value": "REVERT_UPDATE"},
+          {"label": "Fresh Checkout（清空目录重新检出，最慢最干净）", "value": "FRESH_CHECKOUT"},
+          {"label": "Increment Update（reset 到目标版本，保留未跟踪文件）", "value": "INCREMENT_UPDATE"}
+        ],
+        "help": "怀疑上次构建残留把这次带坏了就选 Fresh Checkout；想复用增量编译产物选 Increment Update。"
+      }
+    ]
+  }
+}

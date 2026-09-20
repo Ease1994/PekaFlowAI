@@ -1,0 +1,14 @@
+{
+  "name": "hello-nodejs",
+  "display_name": "Hello Node.js 示例",
+  "category": "exec",
+  "version": "1.0.0",
+  "language": "nodejs",
+  "entrypoint": "node task.js",
+  "description": "Node.js 插件最小示例：读入参、打日志、写输出",
+  "config_schema": {
+    "fields": [
+      { "key": "message", "label": "消息", "type": "text", "default": "hello" }
+    ]
+  }
+}

@@ -1,0 +1,83 @@
+{
+  "name": "k8s-deploy",
+  "display_name": "K8s 部署",
+  "category": "deploy",
+  "version": "1.0.1",
+  "language": "python",
+  "entrypoint": "python3 task.py",
+  "description": "更新 K8s 工作负载的镜像并等待滚动完成，回滚走 rollout undo。在集群内部署时用。单机 Docker 容器请用 docker-deploy。",
+  "config_schema": {
+    "fields": [
+      {
+        "key": "kubeconfig",
+        "label": "kubeconfig",
+        "type": "password",
+        "default": "",
+        "help": "整个 kubeconfig 文件内容。留空则用构建机上默认的 ~/.kube/config"
+      },
+      {
+        "key": "context",
+        "label": "集群 context",
+        "type": "text",
+        "default": "",
+        "placeholder": "留空用 kubeconfig 里的当前 context"
+      },
+      {
+        "key": "namespace",
+        "label": "命名空间",
+        "type": "text",
+        "default": "",
+        "required": true,
+        "placeholder": "必须填写，例如 default 或 prod"
+      },
+      {
+        "key": "workloadKind",
+        "label": "工作负载类型",
+        "type": "select",
+        "default": "deployment",
+        "options": [
+          {"label": "Deployment", "value": "deployment"},
+          {"label": "StatefulSet", "value": "statefulset"},
+          {"label": "DaemonSet", "value": "daemonset"}
+        ]
+      },
+      {
+        "key": "workload",
+        "label": "工作负载名称",
+        "type": "text",
+        "required": true,
+        "placeholder": "order-service"
+      },
+      {
+        "key": "container",
+        "label": "容器名",
+        "type": "text",
+        "default": "",
+        "placeholder": "留空则更新该工作负载里的所有容器",
+        "help": "一个 Pod 有多个容器（比如带 sidecar）时必须指定，否则 sidecar 会被换成业务镜像"
+      },
+      {
+        "key": "image",
+        "label": "镜像",
+        "type": "text",
+        "required": true,
+        "placeholder": "registry.example.com/app/order-service:${{BK_CI_BUILD_NUM}}",
+        "help": "含 tag 的完整地址。别用固定 tag，K8s 认 tag 不认内容，同名 tag 换了内容不会触发滚动"
+      },
+      {
+        "key": "timeout",
+        "label": "滚动超时（秒）",
+        "type": "number",
+        "default": 300,
+        "help": "超时说明新版本没起来，插件会判失败并把 Pod 状态打到日志里"
+      },
+      {
+        "key": "kubectlPath",
+        "label": "kubectl 路径",
+        "type": "text",
+        "default": "",
+        "placeholder": "留空自动探测"
+      }
+    ]
+  }
+}

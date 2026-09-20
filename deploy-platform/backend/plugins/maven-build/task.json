@@ -1,0 +1,74 @@
+{
+  "name": "maven-build",
+  "display_name": "Maven 构建",
+  "category": "build",
+  "version": "1.0.8",
+  "language": "python",
+  "entrypoint": "python3 task.py",
+  "description": "在指定目录执行 Maven 编译打包。在 Java Maven 项目构建时用。Gradle 项目请用 gradle-build。",
+  "config_schema": {
+    "fields": [
+      {
+        "key": "goal",
+        "label": "Maven 目标",
+        "type": "text",
+        "required": true,
+        "default": "package",
+        "placeholder": "package 或 clean package",
+        "help": "会按参数列表传给 mvn，不要写管道和分号"
+      },
+      {
+        "key": "workdir",
+        "label": "执行目录",
+        "type": "text",
+        "default": "",
+        "placeholder": "例如 order-service，留空则在代码根目录执行",
+        "help": "相对 git 检出后的 src/。多模块仓库 pom 不在根上时填子目录。留空则在代码根执行 mvn"
+      },
+      {
+        "key": "skipTests",
+        "label": "跳过测试",
+        "type": "checkbox",
+        "default": false
+      },
+      {
+        "key": "mavenHome",
+        "label": "Maven 安装目录",
+        "type": "text",
+        "default": "",
+        "placeholder": "例如 /data/soft/maven，留空则自动查找",
+        "help": "这台构建机上 Maven 的安装根或 bin 目录。填了就用这一份。留空才扫描 /data/soft/maven、/opt/maven 等常见位置"
+      },
+      {
+        "key": "settingsFile",
+        "label": "settings.xml 路径",
+        "type": "text",
+        "default": "",
+        "placeholder": "留空 = 构建机本机 settings",
+        "help": "不要把带密码的 settings.xml 放进仓库。留空则用 ~/.m2 或 Maven 安装目录里的 settings；需要指定时填构建机上的绝对路径，例如 /data/soft/maven/conf/settings.xml"
+      },
+      {
+        "key": "jdk",
+        "label": "JDK 版本",
+        "type": "select",
+        "options": [
+          {"label": "构建机当前 JAVA_HOME / 自动查找", "value": ""},
+          {"label": "JDK 8", "value": "8"},
+          {"label": "JDK 11", "value": "11"},
+          {"label": "JDK 17", "value": "17"},
+          {"label": "JDK 21", "value": "21"}
+        ],
+        "default": "",
+        "help": "选的是这台构建机上已经装好的 JDK 大版本，平台不会下载安装。路径也可在下面「JDK 安装目录」直接填写"
+      },
+      {
+        "key": "javaHome",
+        "label": "JDK 安装目录",
+        "type": "text",
+        "default": "",
+        "placeholder": "例如 /data/soft/jdk8，留空则按上方版本查找",
+        "help": "这台构建机上 JDK 的安装根。填了就用这一份。留空才用 JAVA_HOME，或按所选版本扫描 /data/soft/jdk8 等常见位置"
+      }
+    ]
+  }
+}

@@ -1,0 +1,63 @@
+{
+  "name": "file-transfer",
+  "display_name": "发送文件到节点",
+  "category": "deploy",
+  "version": "1.1.4",
+  "runtime": "node",
+  "language": "builtin",
+  "entrypoint": "",
+  "description": "节点 Agent 从平台拉取本次增量包，先备份再解压覆盖到站点目录。在 Linux nginx 或 Windows IIS 发站点文件时用。不是 scp，构建机直推请用 ssh-deploy。",
+  "config_schema": {
+    "fields": [
+      {
+        "key": "node",
+        "label": "目标节点",
+        "type": "select",
+        "source": "node",
+        "required": true,
+        "placeholder": "选择已安装节点 Agent 的服务器",
+        "help": "包由节点自己从平台拉取，等价于在那台机器上解压覆盖，不是从构建机 scp 推上去"
+      },
+      {
+        "key": "targetDir",
+        "label": "站点根目录",
+        "type": "text",
+        "required": true,
+        "placeholder": "/data/nginx/html/aicoach-web  或  D:\\wwwroot\\o2o",
+        "help": "对应 scp 的目标路径，必须落在该节点安装时配置的允许目录内。Linux 静态站填 nginx html 目录，Windows 填 IIS 站点物理路径"
+      },
+      {
+        "key": "customBackup",
+        "label": "自定义备份目录",
+        "type": "switch",
+        "default": false,
+        "inferTrueIf": "backupDir",
+        "clearOnOff": ["backupDir"],
+        "help": "默认关掉：备份写到该节点安装时定下的备份根下，再自动建 项目名/流水线名/日期时间/，只备份本次会被覆盖的文件。换磁盘或改整机备份位置，去「节点管理」安装命令里填备份根（BACKUP_ROOT），不要写在流水线里。"
+      },
+      {
+        "key": "backupDir",
+        "label": "备份目录",
+        "type": "text",
+        "default": "",
+        "placeholder": "相对路径，例如 archive",
+        "visibleWhen": { "customBackup": true },
+        "help": "相对于该节点备份根的目录，例如 archive；也可以填备份根下的绝对路径。不能指到站点、临时目录或另一块盘。节点会在你填的位置下再自动建 项目名/流水线名/时间/。"
+      },
+      {
+        "key": "keepBackups",
+        "label": "保留备份份数",
+        "type": "number",
+        "default": 20,
+        "help": "按本条流水线在这台机器上的备份目录计算，默认保留最近 20 份，最多 50。只删除带备份标记的日期文件夹。每次发布最多清 20 份最旧的；项目名缺失落到 unnamed 目录时最多留 5 份。刚写好的这一份不会删。一键回滚依赖这些备份。"
+      },
+      {
+        "key": "dryRun",
+        "label": "预演（只比对不落盘）",
+        "type": "switch",
+        "default": false,
+        "help": "开启后只打印「会覆盖哪些、会新增哪些」，不动生产文件；第一次上线强烈建议先跑一遍"
+      }
+    ]
+  }
+}

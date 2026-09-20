@@ -1,0 +1,99 @@
+{
+  "name": "dotnet-publish",
+  "display_name": "dotnet publish 编译",
+  "category": "build",
+  "version": "1.0.5",
+  "language": "python",
+  "entrypoint": "python3 task.py",
+  "description": "用 dotnet CLI 编译并发布 .NET Core / .NET 5+ 项目，产出可直接部署的目录。在 Core / 5+ 项目时用。.NET Framework 请用 msbuild-build。",
+  "config_schema": {
+    "fields": [
+      {
+        "key": "project",
+        "label": "解决方案 / 项目文件",
+        "type": "text",
+        "required": true,
+        "placeholder": "Admin.NET/Admin.NET.Web.Entry/Admin.NET.Web.Entry.csproj",
+        "help": "相对代码目录的路径。发布要指到具体的 .csproj（启动项目），指到 .sln 时 dotnet publish 不知道该发布哪个"
+      },
+      {
+        "key": "outputDir",
+        "label": "输出目录",
+        "type": "text",
+        "default": "_publish",
+        "placeholder": "_publish",
+        "help": "相对代码目录；「提取增量发布包」步骤的清单就相对这个目录来写"
+      },
+      {
+        "key": "configuration",
+        "label": "配置",
+        "type": "select",
+        "default": "Release",
+        "options": [
+          {"label": "Release", "value": "Release"},
+          {"label": "Debug", "value": "Debug"}
+        ]
+      },
+      {
+        "key": "runtime",
+        "label": "目标运行时",
+        "type": "text",
+        "default": "",
+        "placeholder": "win-x64",
+        "help": "对应 -r 参数。留空则发布为框架依赖版（目标机器需装 .NET 运行时）"
+      },
+      {
+        "key": "selfContained",
+        "label": "自包含发布",
+        "type": "switch",
+        "default": false,
+        "help": "把运行时一起打进产物，目标机器不用装 .NET。产物会大很多，且只在填了目标运行时时有效"
+      },
+      {
+        "key": "restore",
+        "label": "编译前还原 NuGet 包",
+        "type": "switch",
+        "default": true
+      },
+      {
+        "key": "nugetSources",
+        "label": "NuGet 源",
+        "type": "textarea",
+        "default": "",
+        "placeholder": "https://api.nuget.org/v3/index.json",
+        "help": "一行一个，留空则用构建机上 NuGet.config 里的配置。填了就只用这里列的源（等价于 nuget restore -source）"
+      },
+      {
+        "key": "clean",
+        "label": "先清空输出目录",
+        "type": "switch",
+        "default": true,
+        "help": "避免上一次的残留文件混进这次的增量包"
+      },
+      {
+        "key": "removeAfterPublish",
+        "label": "发布后删除",
+        "type": "textarea",
+        "default": "",
+        "placeholder": "Web.config\nWeb.*.config\nappsettings.Development.json",
+        "help": "一行一个，相对输出目录，支持通配符。用来剔除不该覆盖生产的配置文件。某一条匹配不到任何文件会终止发布，避免规则写错后配置被原样打进包"
+      },
+      {
+        "key": "dotnetPath",
+        "label": "dotnet 路径",
+        "type": "text",
+        "default": "",
+        "placeholder": "留空自动探测",
+        "help": "留空时先找 PATH，再找 Program Files\\dotnet"
+      },
+      {
+        "key": "extraArgs",
+        "label": "附加参数",
+        "type": "text",
+        "default": "",
+        "placeholder": "-p:PublishSingleFile=true",
+        "help": "追加到 dotnet publish。不能用 -o / --output 改输出目录"
+      }
+    ]
+  }
+}

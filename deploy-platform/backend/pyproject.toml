@@ -1,0 +1,48 @@
+[project]
+name = "deploy-platform"
+version = "0.1.0"
+description = "统一的多形态发布部署平台 - FastAPI 模块化后端"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "sqlalchemy>=2.0",
+    "pydantic>=2.10",
+    "pydantic-settings>=2.6",
+    "pyjwt>=2.10",
+    "bcrypt>=4.1",
+    "pyyaml>=6.0",
+    "redis>=5.2",
+    "minio>=7.2",
+    "httpx>=0.28",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.8",
+    "mypy>=1.13",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.setuptools.package-data]
+"app.modules.ai.playbooks" = ["*.md"]

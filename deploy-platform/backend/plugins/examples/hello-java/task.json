@@ -1,0 +1,14 @@
+{
+  "name": "hello-java",
+  "display_name": "Hello Java 示例",
+  "category": "exec",
+  "version": "1.0.0",
+  "language": "java",
+  "entrypoint": "java -cp . com.example.HelloAtom",
+  "description": "Java 插件最小示例：读入参、打日志、写输出",
+  "config_schema": {
+    "fields": [
+      { "key": "message", "label": "消息", "type": "text", "default": "hello" }
+    ]
+  }
+}

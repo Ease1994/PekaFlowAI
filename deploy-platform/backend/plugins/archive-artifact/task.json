@@ -1,0 +1,37 @@
+{
+  "name": "archive-artifact",
+  "display_name": "归档制品",
+  "category": "artifact",
+  "version": "1.0.0",
+  "language": "python",
+  "entrypoint": "python3 task.py",
+  "description": "按 glob 收集工作区内的构建产物，打成 zip 上传到平台制品库。在要归档整批产物时用。站点增量包请用 pack-incremental。",
+  "config_schema": {
+    "fields": [
+      {
+        "key": "sourcePath",
+        "label": "归档源路径",
+        "type": "text",
+        "required": true,
+        "default": "target/*.jar",
+        "placeholder": "如：target/*.jar 或 dist/**",
+        "help": "相对代码目录 src/ 的 glob。不要填绝对路径或 ..，否则会把工作区外的文件打进制品"
+      },
+      {
+        "key": "artifactName",
+        "label": "制品名称",
+        "type": "text",
+        "required": true,
+        "placeholder": "如：order-service",
+        "help": "用作 zip 文件名，不含扩展名"
+      },
+      {
+        "key": "version",
+        "label": "版本",
+        "type": "text",
+        "default": "",
+        "placeholder": "留空用发布编号"
+      }
+    ]
+  }
+}

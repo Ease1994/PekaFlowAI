@@ -1,0 +1,60 @@
+{
+  "name": "run-pipeline",
+  "display_name": "运行流水线",
+  "category": "pipeline",
+  "version": "1.1.2",
+  "language": "python",
+  "runtime": "platform",
+  "entrypoint": "python3 task.py",
+  "description": "以同步或异步方式启动指定项目下有权限的流水线。在编排里要触发另一条流水线时用。会拒绝循环调用，不是本条流水线的发布按钮。",
+  "config_schema": {
+    "fields": [
+      {
+        "key": "projectId",
+        "label": "项目",
+        "type": "select",
+        "required": true,
+        "placeholder": "选择项目"
+      },
+      {
+        "key": "pipelineId",
+        "label": "流水线",
+        "type": "select",
+        "required": true,
+        "placeholder": "选择要启动的流水线"
+      },
+      {
+        "key": "runMode",
+        "label": "执行方式",
+        "type": "radio",
+        "required": true,
+        "default": "sync",
+        "options": [
+          {"label": "同步（等待子流水线结束）", "value": "sync"},
+          {"label": "异步（启动后立即继续）", "value": "async"}
+        ]
+      },
+      {
+        "key": "pollInterval",
+        "label": "轮询间隔（秒）",
+        "type": "number",
+        "default": 10,
+        "help": "仅同步执行有效，默认 10 秒"
+      },
+      {
+        "key": "outputNamespace",
+        "label": "输出变量命名空间",
+        "type": "text",
+        "default": "sub_pipeline_",
+        "help": "末尾不是下划线时会自动补上"
+      },
+      {
+        "key": "outputVars",
+        "label": "子流水线输出变量",
+        "type": "text",
+        "placeholder": "多个变量用英文逗号分隔，空则导出全部启动参数",
+        "help": "从子流水线启动参数/输出中按名称取值，写入本步骤输出"
+      }
+    ]
+  }
+}

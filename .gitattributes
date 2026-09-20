@@ -1,0 +1,14 @@
+# 仓库在 Windows 上开发，core.autocrlf 默认把文本文件检出成 CRLF。
+# 对要在 Linux 上执行的文件是致命的：Shell 脚本带 \r 时 bash 会逐行报
+# $'\r': command not found，而报错位置和真正的问题毫不相干，极难查。
+# 节点安装脚本是下发到生产机上跑的，这里必须钉死。
+*.sh text eol=lf
+*.bash text eol=lf
+Dockerfile text eol=lf
+
+# PowerShell 脚本反过来：留 CRLF，老版本 Windows 上更稳
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+
+# jar 是提交进仓库的构建产物，做任何行尾转换都会直接损坏它
+*.jar binary

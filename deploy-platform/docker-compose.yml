@@ -1,0 +1,199 @@
+# ============================================================
+# PekaFlowAI · 完整部署编排（MySQL + Redis + Elasticsearch + 后端 + 前端）
+#
+# 一次性启动全部服务：
+#   docker compose up -d --build
+#
+# 服务与端口（默认不把 MySQL / Redis / ES 打到宿主机）：
+#   - mysql         : 仅容器网（库 deploy_platform）
+#   - redis         : 仅容器网（定时触发延迟队列）
+#   - elasticsearch : 仅容器网（构建日志 / AI 审计按日索引）。换集群到平台设置改地址
+#   - backend       : 8080
+#   - frontend      : 8000（容器内 Nginx 监听 80，反代 /api 到 backend）
+#
+# 调试要在宿主机连库时用：docker compose -f docker-compose.yml -f docker-compose.debug.yml up -d
+#
+# 首次启动：secrets-init 写密钥 → 后端等 MySQL 就绪后建表、补管理员、写默认配置。
+# 口令默认与 .env.example 相同，复制为 .env 就能起。生产请改 .env 后重新部署。
+# ============================================================
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: deploy-mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rp-mysql}
+      MYSQL_DATABASE: deploy_platform
+      TZ: Asia/Shanghai
+    volumes:
+      - mysql-data:/var/lib/mysql
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -p$$MYSQL_ROOT_PASSWORD"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: deploy-redis
+    restart: always
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-rp-redis}
+    volumes:
+      - redis-data:/data
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:-rp-redis}"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-rp-redis}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  elasticsearch:
+    image: elasticsearch:8.17.3
+    container_name: deploy-elasticsearch
+    restart: always
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      xpack.security.http.ssl.enabled: "false"
+      cluster.name: rp-logs
+      ingest.geoip.downloader.enabled: "false"
+      ES_JAVA_OPTS: -Xms512m -Xmx512m
+      TZ: Asia/Shanghai
+    volumes:
+      - es-data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9200 >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 60s
+
+  secrets-init:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: deploy-secrets-init
+    command: ["python", "-m", "app.db.bootstrap"]
+    environment:
+      JWT_SECRET: ${JWT_SECRET:-s-CWJIQchAl5tt9iZtN00F1Xx11z_LL8Yjirh1w7GpQxL_d82UootdE5pKBobRsf}
+      AES_KEY: ${AES_KEY:-hSfSy8kVkzSHIJVXpuI2WRPJietxJCJs-Vu5J0GGZxg}
+      HARNESS_RUNNER_TOKEN: ${HARNESS_RUNNER_TOKEN:-8U-ISm_JxDSSzk62j8CmVU8usgptM3GwJIq08V3sPWa_cSX7vY3xMZE_UsJkR8Bp}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-admin123}
+    volumes:
+      - backend-data:/app/data
+    restart: "no"
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: deploy-backend
+    restart: always
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-mysql+pymysql://root:rp-mysql@mysql:3306/deploy_platform?charset=utf8mb4}
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-rp-redis}
+      TZ: Asia/Shanghai
+      HARNESS_RUNNER_URL: http://harness-runner:8090
+      HARNESS_RUNNER_TOKEN: ${HARNESS_RUNNER_TOKEN:-8U-ISm_JxDSSzk62j8CmVU8usgptM3GwJIq08V3sPWa_cSX7vY3xMZE_UsJkR8Bp}
+      JWT_SECRET: ${JWT_SECRET:-s-CWJIQchAl5tt9iZtN00F1Xx11z_LL8Yjirh1w7GpQxL_d82UootdE5pKBobRsf}
+      AES_KEY: ${AES_KEY:-hSfSy8kVkzSHIJVXpuI2WRPJietxJCJs-Vu5J0GGZxg}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-admin123}
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+      # 首次写入平台设置。保存过后以库为准，设置页可以改成自备集群。
+      ES_HOSTS: ${ES_HOSTS:-http://elasticsearch:9200}
+    volumes:
+      # 制品、上传的插件包、公共安装包（shared-packs/jdk-linux 等）落在这里。不挂卷的话，
+      # 重建一次容器文件就没了；JDK 包没了则装 Linux 节点会 404。
+      - backend-data:/app/data
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        # 只等容器起来，不等 ping。Redis 挂了后端仍要能启动，定时触发/实时日志自行降级。
+        condition: service_started
+      elasticsearch:
+        # 只等进程起来。ES 冷启动可能要一分钟，健康页会显示 down，日志稍后自动写上。
+        condition: service_started
+      secrets-init:
+        condition: service_completed_successfully
+    ports:
+      - "8080:8080"
+    networks:
+      - default
+      - harness-internal
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8080/api/v1/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  harness-runner:
+    build:
+      context: ./harness-runner
+      dockerfile: Dockerfile
+    container_name: deploy-harness-runner
+    restart: always
+    user: "65532:65532"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    # 只限内存和进程数。不要写 cpus：不少测试机是 cgroup v1 或没挂 cpu 控制器，
+    # runc 会去写 /sys/fs/cgroup/.../cpu.max，容器直接起不来。
+    pids_limit: 64
+    mem_limit: 256m
+    tmpfs:
+      - /tmp:size=128m,mode=1770,uid=65532,gid=65532
+    environment:
+      HARNESS_RUNNER_TOKEN: ${HARNESS_RUNNER_TOKEN:-8U-ISm_JxDSSzk62j8CmVU8usgptM3GwJIq08V3sPWa_cSX7vY3xMZE_UsJkR8Bp}
+      HARNESS_PACKAGE_ROOT: /packages
+      HARNESS_BROKER_URL: http://backend:8080/api/v1/harness/broker
+      HARNESS_TOOL_TIMEOUT_SEC: "60"
+    volumes:
+      - backend-data:/packages:ro
+    depends_on:
+      secrets-init:
+        condition: service_completed_successfully
+    networks:
+      - harness-internal
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8090/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: deploy-frontend
+    restart: always
+    depends_on:
+      - backend
+    ports:
+      - "8000:80"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  mysql-data:
+  redis-data:
+  es-data:
+  backend-data:
+
+networks:
+  harness-internal:
+    internal: true

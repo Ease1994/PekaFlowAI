@@ -1,0 +1,116 @@
+{
+  "name": "docker-deploy",
+  "display_name": "Docker 容器部署",
+  "category": "deploy",
+  "version": "1.0.3",
+  "language": "python",
+  "entrypoint": "python3 task.py",
+  "description": "拉取镜像并重建容器，并记下上一个镜像版本供一键回滚。在 Docker 主机上发容器时用。K8s 工作负载请用 k8s-deploy。",
+  "config_schema": {
+    "fields": [
+      {
+        "key": "image",
+        "label": "镜像",
+        "type": "text",
+        "required": true,
+        "placeholder": "registry.example.com/app/order-service:${{BK_CI_BUILD_NUM}}",
+        "help": "含 tag 的完整地址。回滚靠的是「上一个 tag 的镜像还在仓库里」，别用固定 tag"
+      },
+      {
+        "key": "containerName",
+        "label": "容器名",
+        "type": "text",
+        "required": true,
+        "placeholder": "order-service",
+        "help": "同名容器会被停掉并替换。回滚时按这个名字找回上一个镜像"
+      },
+      {
+        "key": "dockerHost",
+        "label": "目标 Docker 地址",
+        "type": "text",
+        "default": "",
+        "placeholder": "ssh://deploy@10.0.1.20 或 tcp://10.0.1.20:2376",
+        "help": "留空则部署到构建机本机。远程用 ssh:// 最省事，不用在目标机开放 docker 端口"
+      },
+      {
+        "key": "ports",
+        "label": "端口映射",
+        "type": "textarea",
+        "default": "",
+        "placeholder": "8080:8080\n9090:9090",
+        "help": "一行一个，宿主端口:容器端口"
+      },
+      {
+        "key": "envs",
+        "label": "环境变量",
+        "type": "textarea",
+        "default": "",
+        "placeholder": "SPRING_PROFILES_ACTIVE=prod\nTZ=Asia/Shanghai"
+      },
+      {
+        "key": "volumes",
+        "label": "挂载",
+        "type": "textarea",
+        "default": "",
+        "placeholder": "/data/logs:/app/logs",
+        "help": "一行一个，宿主路径:容器路径"
+      },
+      {
+        "key": "network",
+        "label": "网络",
+        "type": "text",
+        "default": "",
+        "placeholder": "bridge"
+      },
+      {
+        "key": "restart",
+        "label": "重启策略",
+        "type": "select",
+        "default": "always",
+        "options": [
+          {"label": "always", "value": "always"},
+          {"label": "unless-stopped", "value": "unless-stopped"},
+          {"label": "on-failure", "value": "on-failure"},
+          {"label": "no", "value": "no"}
+        ]
+      },
+      {
+        "key": "healthTimeout",
+        "label": "启动确认时间（秒）",
+        "type": "number",
+        "default": 30,
+        "help": "启动后观察这么久，容器中途退出就判失败。设 0 表示不等"
+      },
+      {
+        "key": "extraArgs",
+        "label": "附加参数",
+        "type": "text",
+        "default": "",
+        "placeholder": "--memory=2g",
+        "help": "原样追加到 docker run 命令行"
+      },
+      {
+        "key": "registryCredentialId",
+        "label": "镜像仓库凭证",
+        "type": "select",
+        "source": "credential",
+        "placeholder": "选择华为云 SWR / 阿里云 ACR 等仓库账号",
+        "help": "私有仓库才需要。在「凭证管理」里建账号密码，选了就不用再填下面的用户名密码。"
+      },
+      {
+        "key": "registryUser",
+        "label": "仓库用户名",
+        "type": "text",
+        "default": "",
+        "help": "未选凭证时才需要手填"
+      },
+      {
+        "key": "registryPassword",
+        "label": "仓库密码 / Token",
+        "type": "password",
+        "default": "",
+        "help": "未选凭证时才需要手填"
+      }
+    ]
+  }
+}

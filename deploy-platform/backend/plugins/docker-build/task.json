@@ -1,0 +1,98 @@
+{
+  "name": "docker-build",
+  "display_name": "Docker 镜像构建",
+  "category": "build",
+  "version": "1.0.3",
+  "language": "python",
+  "entrypoint": "python3 task.py",
+  "description": "用 Dockerfile 打业务镜像并推送到仓库。在要产出可部署镜像时用。在工具链镜像里编译请用 docker-compile，不要和本步骤搞混。",
+  "config_schema": {
+    "fields": [
+      {
+        "key": "image",
+        "label": "镜像名",
+        "type": "text",
+        "required": true,
+        "placeholder": "registry.example.com/app/order-service",
+        "help": "不含 tag 的完整地址（含仓库域名和项目路径）"
+      },
+      {
+        "key": "tag",
+        "label": "镜像 tag",
+        "type": "text",
+        "default": "${{BK_CI_BUILD_NUM}}",
+        "placeholder": "${{BK_CI_BUILD_NUM}}",
+        "help": "默认用构建号。别用固定 tag（如 latest）当唯一标识，那样回滚时找不回上一个版本"
+      },
+      {
+        "key": "extraTags",
+        "label": "附加 tag",
+        "type": "text",
+        "default": "",
+        "placeholder": "latest",
+        "help": "逗号分隔。同一镜像会额外打这些 tag 并推送，方便别处引用"
+      },
+      {
+        "key": "dockerfile",
+        "label": "Dockerfile 路径",
+        "type": "text",
+        "default": "Dockerfile",
+        "placeholder": "Dockerfile",
+        "help": "相对构建上下文目录"
+      },
+      {
+        "key": "context",
+        "label": "构建上下文目录",
+        "type": "text",
+        "default": ".",
+        "placeholder": ".",
+        "help": "相对代码目录（src/）"
+      },
+      {
+        "key": "buildArgs",
+        "label": "构建参数",
+        "type": "textarea",
+        "default": "",
+        "placeholder": "NODE_ENV=production\nAPP_VERSION=${{BK_CI_BUILD_NUM}}",
+        "help": "一行一个 KEY=VALUE，对应 --build-arg"
+      },
+      {
+        "key": "push",
+        "label": "推送到仓库",
+        "type": "switch",
+        "default": true,
+        "help": "关掉只在本机构建。部署到别的机器必须推送，否则那边拉不到"
+      },
+      {
+        "key": "registryCredentialId",
+        "label": "镜像仓库凭证",
+        "type": "select",
+        "source": "credential",
+        "placeholder": "选择华为云 SWR / 阿里云 ACR 等仓库账号",
+        "help": "在「凭证管理」里建账号密码。选了就不用再填下面的用户名密码；密码不会写进流水线配置。"
+      },
+      {
+        "key": "registryUser",
+        "label": "仓库用户名",
+        "type": "text",
+        "default": "",
+        "help": "未选凭证时才需要手填。留空则用构建机上已有的 docker login 状态"
+      },
+      {
+        "key": "registryPassword",
+        "label": "仓库密码 / Token",
+        "type": "password",
+        "default": "",
+        "help": "未选凭证时才需要手填"
+      },
+      {
+        "key": "extraArgs",
+        "label": "附加参数",
+        "type": "text",
+        "default": "",
+        "placeholder": "--no-cache",
+        "help": "只允许 --build-arg / --label / --no-cache 这类安全选项。Dockerfile 和 tag 用上面的字段，不要在这里写 -f 或 -t"
+      }
+    ]
+  }
+}

@@ -1,0 +1,18 @@
+# 后端构建上下文排除
+.venv
+__pycache__
+*.pyc
+*.db
+.env
+.git
+.gitignore
+# Agent 的编译中间产物不进镜像；src 要保留：
+# 启动时拿它和 deploy-agent.jar.srcsha 比对，好发现 jar 是不是漏编译了
+agent-java/out
+agent-java/*.bat
+agent-java/*.sh
+agent-java/README.md
+agent-go
+tests
+sql
+smoke_test.py

@@ -1,0 +1,69 @@
+{
+  "name": "ssh-deploy",
+  "display_name": "SSH 发送文件",
+  "category": "deploy",
+  "version": "1.0.0",
+  "language": "python",
+  "entrypoint": "python3 task.py",
+  "description": "从构建机用 scp 把工作区目录推到远程 Linux。在目标机没装节点 Agent、只开了 SSH 时用。不是节点 Agent 拉增量包覆盖，那个请用 file-transfer。",
+  "config_schema": {
+    "fields": [
+      {
+        "key": "host",
+        "label": "目标主机",
+        "type": "text",
+        "required": true,
+        "placeholder": "192.0.2.10",
+        "help": "IP 或主机名。构建机必须能 SSH 连上它"
+      },
+      {
+        "key": "port",
+        "label": "SSH 端口",
+        "type": "number",
+        "default": 22,
+        "help": "默认 22"
+      },
+      {
+        "key": "user",
+        "label": "SSH 用户",
+        "type": "text",
+        "required": true,
+        "placeholder": "root",
+        "help": "远程登录名。选了账号密码凭证且这里留空时，用凭证里的用户名"
+      },
+      {
+        "key": "credentialId",
+        "label": "登录凭证",
+        "type": "select",
+        "source": "ssh-credential",
+        "required": true,
+        "placeholder": "选择 SSH 私钥或账号密码",
+        "help": "在「凭证管理」里建。推荐 SSH 私钥；账号密码需要构建机安装 sshpass"
+      },
+      {
+        "key": "sourcePath",
+        "label": "本地目录",
+        "type": "text",
+        "required": true,
+        "default": "dist",
+        "placeholder": "dist",
+        "help": "相对代码目录 src/，例如 npm build 的 dist。目录内容会覆盖到远端，不会再套一层 dist 文件夹"
+      },
+      {
+        "key": "targetDir",
+        "label": "远程目录",
+        "type": "text",
+        "required": true,
+        "placeholder": "/data/nginx/html/aicoach-web",
+        "help": "Linux 绝对路径。会先 ssh mkdir -p，再 scp 覆盖已有文件，不会删除远端多出来的文件"
+      },
+      {
+        "key": "dryRun",
+        "label": "预演（只列出不传输）",
+        "type": "switch",
+        "default": false,
+        "help": "开启后只打印将发送的路径，不动远程文件"
+      }
+    ]
+  }
+}

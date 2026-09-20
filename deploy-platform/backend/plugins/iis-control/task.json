@@ -1,0 +1,69 @@
+{
+  "name": "iis-control",
+  "display_name": "IIS 启停控制",
+  "category": "deploy",
+  "version": "1.1.0",
+  "runtime": "node",
+  "language": "builtin",
+  "entrypoint": "",
+  "description": "停止或启动指定节点上的 IIS 应用池/站点。在 Windows IIS 站点发完文件后要启停时用。Linux systemd/Docker 请用 service-control。",
+  "config_schema": {
+    "fields": [
+      {
+        "key": "node",
+        "label": "目标节点",
+        "type": "select",
+        "source": "node",
+        "required": true,
+        "placeholder": "选择已安装节点 Agent 的服务器",
+        "help": "在「节点管理」里注册的机器；这一步会派给它自己执行"
+      },
+      {
+        "key": "action",
+        "label": "操作",
+        "type": "radio",
+        "required": true,
+        "default": "stop",
+        "options": [
+          {"label": "停止", "value": "stop"},
+          {"label": "启动", "value": "start"},
+          {"label": "回收（仅应用池）", "value": "recycle"},
+          {"label": "查看状态", "value": "status"}
+        ]
+      },
+      {
+        "key": "target",
+        "label": "对象",
+        "type": "radio",
+        "required": true,
+        "default": "apppool",
+        "options": [
+          {"label": "应用池", "value": "apppool"},
+          {"label": "站点", "value": "site"}
+        ]
+      },
+      {
+        "key": "name",
+        "label": "应用池 / 站点名称",
+        "type": "text",
+        "required": true,
+        "placeholder": "如 DefaultAppPool 或 o2o.example.com",
+        "help": "填 IIS 里的名称，大小写要一致。节点会查该对象的物理路径，必须落在该节点的允许目录内才放行；查不到或查询失败则本步骤失败"
+      },
+      {
+        "key": "waitSeconds",
+        "label": "等待就绪（秒）",
+        "type": "number",
+        "default": 15,
+        "help": "执行后等待状态变更的最长时间，超时视为失败"
+      },
+      {
+        "key": "ignoreMissing",
+        "label": "对象不存在时跳过",
+        "type": "switch",
+        "default": false,
+        "help": "开启后，应用池/站点不存在只告警不失败；日常发布建议关闭"
+      }
+    ]
+  }
+}

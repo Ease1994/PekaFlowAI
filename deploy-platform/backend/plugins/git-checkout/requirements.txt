@@ -1,0 +1,2 @@
+# git-checkout 插件运行依赖（Agent 机器需已安装 git + python3）
+# SDK 随包拷贝，无需 pip 安装

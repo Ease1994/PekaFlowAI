@@ -1,0 +1,46 @@
+{
+  "name": "pack-incremental",
+  "display_name": "提取增量发布包",
+  "category": "artifact",
+  "version": "1.0.7",
+  "language": "python",
+  "entrypoint": "python3 task.py",
+  "description": "按发布清单从编译产物提取要发的文件，打成 zip 上传到平台，供「发送文件到节点」拉取。在发前端 dist 或后端 _publish 增量包时用。不是把整个工作区打制品（那个用 archive-artifact）。",
+  "config_schema": {
+    "fields": [
+      {
+        "key": "sourceDir",
+        "label": "编译产物目录",
+        "type": "text",
+        "required": true,
+        "default": "_publish",
+        "placeholder": "相对 src/ 的路径，如 dist、build、_publish",
+        "help": "相对仓库源码目录。前端常见 dist（Vite/Vue）或 build；msbuild 的 Web 发布输出一般是 _publish。清单里的路径都相对于它，解压后就是站点根目录的结构"
+      },
+      {
+        "key": "manifest",
+        "label": "发布清单",
+        "type": "textarea",
+        "required": true,
+        "default": "${{DEPLOY_MANIFEST}}",
+        "placeholder": "index.html\nassets/\n*.ico\n# 或 IIS：\nbin/*.dll\nAreas/",
+        "help": "默认取「发布提交」单里填的清单。前端全量相对 dist 写顶层文件/目录（目录以 / 结尾表示整棵子树）。也可以写死：一行一条；! 开头排除，# 开头注释"
+      },
+      {
+        "key": "version",
+        "label": "包版本",
+        "type": "text",
+        "default": "",
+        "placeholder": "留空用发布编号",
+        "help": "仅用于制品命名与追溯"
+      },
+      {
+        "key": "dryRun",
+        "label": "预演（只列文件不打包）",
+        "type": "switch",
+        "default": false,
+        "help": "开启后只打印清单命中的文件列表，方便先确认范围再正式发布"
+      }
+    ]
+  }
+}
