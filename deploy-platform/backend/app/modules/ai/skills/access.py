@@ -302,7 +302,7 @@ def load() -> None:
     ))
     register(Skill(
         name="apply_project_execute",
-        description="一张申请覆盖整个项目全部环境。默认查看+执行；用户点名编辑/删除/审批/豁免或全部权限时把 actions 带上。只要某个环境改用 apply_group_execute；只要一条线改用 apply_pipeline_execute。不是立刻发布。",
+        description="整项目权限时调用。一张单覆盖全部环境。默认查看+执行；点名编辑/删除/审批/豁免或全部权限时带 actions。某个环境改用 apply_group_execute；一条线改用 apply_pipeline_execute。不是立刻发布。",
         category="access",
         risk="write",
         parameters={
@@ -319,7 +319,7 @@ def load() -> None:
     ))
     register(Skill(
         name="apply_group_execute",
-        description="一张申请覆盖某个环境分组下全部流水线。默认查看+执行；点名其它动作时带 actions。整项目改用 apply_project_execute，单条线改用 apply_pipeline_execute。不是立刻发布。",
+        description="某个环境分组权限时调用。一张单覆盖该环境下全部流水线。默认查看+执行；点名其它动作时带 actions。整项目改用 apply_project_execute，单条线改用 apply_pipeline_execute。不是立刻发布。",
         category="access",
         risk="write",
         parameters={
@@ -337,7 +337,7 @@ def load() -> None:
     ))
     register(Skill(
         name="apply_pipeline_execute",
-        description="只申请某一条流水线的权限。默认查看+执行；点名编辑/删除/审批/全部权限时把 actions 带上。整个项目或某个环境不要用本工具循环。不是发起发布。",
+        description="只要某一条流水线权限时调用。默认查看+执行；点名编辑/删除/审批/全部权限时带 actions。整个项目或某个环境不要循环调用本工具。不是发起发布。",
         category="access",
         risk="write",
         parameters={
@@ -354,7 +354,7 @@ def load() -> None:
     ))
     register(Skill(
         name="apply_project_role",
-        description="申请加入某个项目的角色。用户点名「某某角色」时用本工具，不要改成申请流水线动作。通过后写角色成员，不是立刻授权。没点名角色时改用 apply_project_execute / apply_group_execute / apply_pipeline_execute。",
+        description="用户点名项目角色时调用。通过后写入角色成员。不要改成流水线动作申请。没点名角色时改用 apply_project_execute、apply_group_execute 或 apply_pipeline_execute。",
         category="access",
         risk="write",
         parameters={
