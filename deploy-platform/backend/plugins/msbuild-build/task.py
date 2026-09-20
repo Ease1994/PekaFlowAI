@@ -11,7 +11,7 @@ import os
 import re
 import shutil
 import sys
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -75,6 +75,22 @@ _SLN_PROJECT_LINE = re.compile(
 )
 
 
+def _msbuild_relpath(raw: str) -> Path:
+    """把 sln / 步骤里的 Windows 相对路径拆成当前系统的 Path。
+
+    .sln 和 OutputPath 用反斜杠。Linux 上 Path('App\\\\App.csproj') 会当成一个文件名，
+    必须按 Windows 规则拆段再 join。
+    """
+    text = (raw or "").strip()
+    if not text:
+        return Path()
+    win = PureWindowsPath(text.replace("/", "\\"))
+    if win.is_absolute() or win.anchor:
+        return Path(str(win))
+    parts = [p for p in win.parts if p not in {".", ""}]
+    return Path(*parts) if parts else Path()
+
+
 def _nuget_restore_cmd(
     nuget: str,
     target: Path,
@@ -105,8 +121,8 @@ def _sln_projects(sln: Path) -> list[Path]:
     out: list[Path] = []
     seen: set[Path] = set()
     for match in _SLN_PROJECT.finditer(text):
-        rel = match.group(1).strip().replace("/", os.sep)
-        p = Path(rel)
+        rel = match.group(1).strip()
+        p = _msbuild_relpath(rel)
         full = p if p.is_absolute() else (root / p)
         if not _is_build_project_path(rel):
             continue
@@ -310,12 +326,12 @@ def _under_workspace(workspace: Path, path: Path, *, what: str) -> Path:
 
 def _resolve_project(src: Path, raw: str, *, required: bool, what: str) -> Path | None:
     """工程文件必须在代码目录内。"""
-    value = (raw or "").strip().replace("/", os.sep)
+    value = (raw or "").strip()
     if not value:
         if required:
             raise BuildError(f"必须填写{what}")
         return None
-    p = Path(value)
+    p = _msbuild_relpath(value)
     if p.is_absolute() or ".." in p.parts:
         raise BuildError(f"{what}必须是代码目录内的相对路径")
     full = (src / p).resolve()
@@ -444,10 +460,10 @@ def _assert_compile_target(project: Path, mode: str) -> None:
 
 def _resolve_output_path(workspace: Path, workdir: Path, raw: str) -> Path | None:
     """普通编译可选的 OutputPath，必须落在工作区内。"""
-    value = (raw or "").strip().replace("/", os.sep)
+    value = (raw or "").strip()
     if not value:
         return None
-    p = Path(value)
+    p = _msbuild_relpath(value)
     if p.is_absolute() or ".." in p.parts:
         raise BuildError("OutputPath 必须是工作区内的相对路径")
     full = (workdir / p).resolve()
@@ -537,11 +553,12 @@ def main() -> int:
 
     configuration = str(inp.get("configuration") or "Release").strip()
     platform = str(inp.get("platform") or "Any CPU").strip()
-    out_raw = str(inp.get("outputDir") or "_publish").strip().replace("/", os.sep)
+    out_raw = str(inp.get("outputDir") or "_publish").strip()
+    out_path = _msbuild_relpath(out_raw) if out_raw else Path("_publish")
     try:
         out_dir = _under_workspace(
             workspace,
-            Path(out_raw) if Path(out_raw).is_absolute() else src / out_raw,
+            out_path if out_path.is_absolute() else src / out_path,
             what="输出目录",
         )
     except BuildError as e:
