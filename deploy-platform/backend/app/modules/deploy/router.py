@@ -285,9 +285,9 @@ def release_deploy_request(
     if not check_permission(db, current, "pipeline", req.pipeline_id, "execute"):
         raise BizException.forbidden(f"无权限：对流水线 #{req.pipeline_id} 发起发布")
 
-    params = service.run_params_for(req)
-    # 页面上额外填的参数不能覆盖单子本身的清单，否则发出去的和单子上写的对不上
-    params = {**(body.get("run_params") or {}), **params}
+    pipe = pipeline_service.get_pipeline(db, req.pipeline_id)
+    # 清单与执行弹窗同一套失败关闭：空草稿不能写成 DEPLOY_MANIFEST="" 再开跑
+    params = service.run_params_for(req, pipe, body.get("run_params"))
     from app.modules.pm.service import brief_from_request
 
     release = pipeline_service.create_release(
