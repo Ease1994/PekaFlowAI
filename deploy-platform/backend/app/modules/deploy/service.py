@@ -358,10 +358,20 @@ def sync_release_status(db: Session, req: DeployRequest) -> DeployRequest:
     return req
 
 
-def run_params_for(req: DeployRequest) -> dict:
-    """把单子上的内容转成流水线执行参数。"""
-    return {
-        VAR_MANIFEST: req.manifest or "",
-        VAR_CHANGELOG: req.changelog or "",
-        VAR_REQUEST_ID: str(req.id),
-    }
+def run_params_for(req: DeployRequest, pipeline, extra: dict | None = None) -> dict:
+    """把单子上的内容转成流水线执行参数。
+
+    清单与执行弹窗、AI 发布共用 apply_execute_manifest：
+    增量线步骤仍是占位且单子没填 → 当场拒绝，不写入空串、也不会写成 `**`。
+    步骤已写死文件列表且单子为空 → 不注入 DEPLOY_MANIFEST，避免把写死内容替换成空。
+    extra 里即使带了 DEPLOY_MANIFEST 也丢掉，发出去的必须和单子上写的一致。
+    更新日志和单号始终带上，给步骤引用。
+    """
+    params: dict = {}
+    for key, val in (extra or {}).items():
+        if key == VAR_MANIFEST or val is None:
+            continue
+        params[str(key)] = val
+    params[VAR_CHANGELOG] = req.changelog or ""
+    params[VAR_REQUEST_ID] = str(req.id)
+    return apply_execute_manifest(pipeline, params, req.manifest)

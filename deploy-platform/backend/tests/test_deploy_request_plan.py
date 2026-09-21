@@ -7,7 +7,14 @@ from sqlalchemy.orm import Session
 from app.core.response import BizException
 from app.db.base import Base
 from app.modules.deploy.models import DeployRequest
-from app.modules.deploy.service import create_request, delete_request, update_request
+from app.modules.deploy.service import (
+    MISSING_MANIFEST_MSG,
+    VAR_MANIFEST,
+    create_request,
+    delete_request,
+    run_params_for,
+    update_request,
+)
 from app.modules.pipeline.models import Pipeline
 
 
@@ -38,6 +45,23 @@ pipeline:
               plugin: npm-build
               with:
                 script: build
+"""
+
+HARDCODED_YAML = """
+pipeline:
+  name: win
+  stages:
+    - name: 发布
+      jobs:
+        - name: pack
+          steps:
+            - name: 提取增量包
+              plugin: pack-incremental
+              with:
+                sourceDir: _publish
+                manifest: |
+                  bin/*.dll
+                  Areas/
 """
 
 
@@ -140,6 +164,94 @@ def test_update_and_delete_plan() -> None:
     assert updated.title == "改过的计划"
     delete_request(db, req.id)
     assert db.get(DeployRequest, req.id) is None
+
+
+def test_incremental_empty_ticket_cannot_become_run_params() -> None:
+    """草稿空清单不能写成 DEPLOY_MANIFEST=""：占位会被替换成空，打包要跑到现场才失败。"""
+    db = _db()
+    pipe = _pipe(db, "Windows增量发布", INCREMENTAL_YAML)
+    req = create_request(
+        db,
+        project_id=1,
+        pipeline_id=pipe.id,
+        title="草稿",
+        repo="",
+        source_ref="",
+        changelog="",
+        manifest="",
+        status="draft",
+        operator_id=1,
+    )
+    try:
+        run_params_for(req, pipe)
+        raise AssertionError("增量占位未填必须拒绝")
+    except BizException as exc:
+        assert exc.code == 400
+        assert exc.message == MISSING_MANIFEST_MSG
+
+
+def test_incremental_ticket_manifest_wins_over_extra() -> None:
+    """额外 run_params 里的 ** 不能盖过单子点名的文件。"""
+    db = _db()
+    pipe = _pipe(db, "Windows增量发布", INCREMENTAL_YAML)
+    req = create_request(
+        db,
+        project_id=1,
+        pipeline_id=pipe.id,
+        title="今晚发 Windows",
+        repo="",
+        source_ref="",
+        changelog="修登录",
+        manifest="bin/*.dll\nAreas/",
+        status="submitted",
+        operator_id=1,
+    )
+    params = run_params_for(req, pipe, {VAR_MANIFEST: "**", "FOO": "1"})
+    assert params[VAR_MANIFEST] == "bin/*.dll\nAreas/"
+    assert params["FOO"] == "1"
+    assert params["DEPLOY_CHANGELOG"] == "修登录"
+    assert params["DEPLOY_REQUEST_ID"] == str(req.id)
+
+
+def test_frontend_plan_run_params_omit_empty_manifest() -> None:
+    """非整包增量线不写 DEPLOY_MANIFEST，空串不能进变量表。"""
+    db = _db()
+    pipe = _pipe(db, "前端发布", FRONTEND_YAML)
+    req = create_request(
+        db,
+        project_id=1,
+        pipeline_id=pipe.id,
+        title="今晚发前端",
+        repo="",
+        source_ref="",
+        changelog="",
+        manifest="",
+        status="submitted",
+        operator_id=1,
+    )
+    params = run_params_for(req, pipe)
+    assert VAR_MANIFEST not in params
+    assert params["DEPLOY_REQUEST_ID"] == str(req.id)
+
+
+def test_hardcoded_step_empty_ticket_does_not_blank_manifest() -> None:
+    """步骤已写死文件列表时，空单子不能注入空的 DEPLOY_MANIFEST。"""
+    db = _db()
+    pipe = _pipe(db, "Windows写死清单", HARDCODED_YAML)
+    req = create_request(
+        db,
+        project_id=1,
+        pipeline_id=pipe.id,
+        title="草稿",
+        repo="",
+        source_ref="",
+        changelog="",
+        manifest="",
+        status="draft",
+        operator_id=1,
+    )
+    params = run_params_for(req, pipe)
+    assert VAR_MANIFEST not in params
 
 
 def test_cannot_delete_releasing_plan() -> None:
