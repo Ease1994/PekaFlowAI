@@ -96,15 +96,31 @@ def emit(
                 pending_wecom.append((uid, title, content, link))
         if commit:
             db.commit()
-    # 邮件 / 企微走网络，慢，不该占着去重锁
+    # 邮件 / 企微走网络，慢，不该占着去重锁，也不该挡住「保存并执行」这种创建接口
     if commit:
         for addr, subj, body, href in pending_mail:
             deliver_email(addr, subj, body, href)
-    # 企微不跟 commit 走：审批待办的 emit 都是嵌在业务事务里、由外层提交，
-    # 等 commit=True 才推的话，手机永远收不到「待你确认」
-    for uid, subj, body, href in pending_wecom:
-        deliver_wecom(db, uid, subj, body, href)
+    # 审批待办的 emit 嵌在业务事务里，等外层 commit 后再推手机也来得及。
+    # 同步调企微时 gettoken 超时 30 秒，弹窗会一直转圈。
+    for item in pending_wecom:
+        threading.Thread(
+            target=_deliver_wecom_later,
+            args=item,
+            name=f"wecom-{item[0]}",
+            daemon=True,
+        ).start()
     return written
+
+
+def _deliver_wecom_later(user_id: int, title: str, content: str, link: str) -> None:
+    """用独立会话推企微，避免占用创建发布的请求会话。"""
+    from app.db.session import SessionLocal
+
+    try:
+        with SessionLocal() as db:
+            deliver_wecom(db, user_id, title, content, link)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("企微后台推送失败 user=%s：%s", user_id, e)
 
 
 def _recipients(

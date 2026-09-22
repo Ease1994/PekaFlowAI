@@ -741,18 +741,9 @@ def create_release(
             "need_user_notice": bool(body.get("need_user_notice", False)),
         },
     )
-    # 如果调用方没传 source_ref，自动从流水线第一个 git-checkout 步骤拉 commit
-    # 这样 Rebuild 时自动复用本次发布的 commit（无需用户手填）
-    if not release.source_ref:
-        try:
-            pipeline = service.get_pipeline(db, release.pipeline_id)
-            auto_ref = source_ref_service.resolve_source_ref(db, pipeline)
-            if auto_ref:
-                release.source_ref = auto_ref
-                db.commit()
-                db.refresh(release)
-        except Exception as e:  # noqa: BLE001
-            print(f"[create_release] 自动获取 source_ref 失败（不影响发布）: {e}")
+    # SHA 给 Rebuild 和变更列表用，问 Git 托管不能挡创建接口返回
+    if not (release.source_ref or "").strip():
+        source_ref_service.fill_source_ref_later(release.id)
     # 测试分组（queued）→ 立即执行；生产分组（pending）→ 走审批，审批通过后再执行
     if release.status == "queued":
         release, err = service.try_execute_release(db, release.id)
