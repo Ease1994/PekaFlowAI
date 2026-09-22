@@ -46,7 +46,7 @@ def test_git_missing_explains_install(monkeypatch):
     assert "git" in str(exc.value).lower()
 
 
-def test_run_uses_argv_not_shell():
+def test_run_uses_argv_not_shell(monkeypatch):
     import base64
 
     task = _load("git-checkout")
@@ -55,19 +55,24 @@ def test_run_uses_argv_not_shell():
     assert "shell=False" in src
     # token 不进 clone URL；GitLab git-http 要的是 Basic oauth2:token，不是 Bearer
     assert "https://oauth2:" not in src
-    env = task._git_env("s3cret")
-    header = env["GIT_CONFIG_VALUE_2"]
-    assert header.startswith("Authorization: Basic ")
-    assert "Bearer" not in header
+    monkeypatch.setattr(task, "find_git", lambda: "git")
+    argv = task._git_argv(
+        ["git", "clone", "https://example.com/r.git"],
+        token="s3cret",
+        username="",
+    )
+    header = argv[6]
+    assert header.startswith("http.extraHeader=Authorization: Basic ")
     decoded = base64.b64decode(header.split()[-1]).decode("utf-8")
     assert decoded == "oauth2:s3cret"
-    assert env["GIT_CONFIG_KEY_2"] == "http.extraHeader"
+    assert "Bearer" not in header
+    env = task._git_env()
     assert env["GCM_INTERACTIVE"] == "never"
-    assert env["GIT_CONFIG_KEY_0"] == "credential.helper"
-    assert env["GIT_CONFIG_VALUE_0"] == ""
+    assert "GIT_ASKPASS" not in env
+    assert "GIT_CONFIG_COUNT" not in env
 
 
-def test_password_json_uses_real_username():
+def test_password_json_uses_real_username(monkeypatch):
     """账号密码凭证不能再被当成 oauth2:整段 JSON。"""
     import base64
 
@@ -75,9 +80,28 @@ def test_password_json_uses_real_username():
     user, secret = task._split_secret('{"username":"kang","password":"p@ss"}', "")
     assert user == "kang"
     assert secret == "p@ss"
-    env = task._git_env(secret, user)
-    decoded = base64.b64decode(env["GIT_CONFIG_VALUE_2"].split()[-1]).decode("utf-8")
+    monkeypatch.setattr(task, "find_git", lambda: "git")
+    argv = task._git_argv(["git", "fetch", "origin"], token=secret, username=user)
+    decoded = base64.b64decode(argv[6].split()[-1]).decode("utf-8")
     assert decoded == "kang:p@ss"
+
+
+def test_parent_askpass_echo_stripped(monkeypatch):
+    """父进程残留的 GIT_ASKPASS=echo 必须摘掉，否则会把提示语当密码发出去。"""
+    monkeypatch.setenv("GIT_ASKPASS", "echo")
+    monkeypatch.setenv("SSH_ASKPASS", "echo")
+    task = _load("git-checkout")
+    env = task._git_env()
+    assert "GIT_ASKPASS" not in env
+    assert "SSH_ASKPASS" not in env
+
+
+def test_auth_usernames_retries_oauth2():
+    """真实用户名失败后还要试 oauth2，GitLab PAT 才认这个用户名。"""
+    task = _load("git-checkout")
+    assert task._auth_usernames("kang") == ["kang", "oauth2"]
+    assert task._auth_usernames("oauth2") == ["oauth2"]
+    assert task._auth_usernames("") == ["oauth2"]
 
 
 def test_no_home_git_cache(monkeypatch):
@@ -89,4 +113,5 @@ def test_no_home_git_cache(monkeypatch):
     monkeypatch.setattr(task, "find_git", lambda: "git")
     argv = task._git_argv(["git", "clone", "https://example.com/r.git"])
     assert argv[1:5] == ["-c", "credential.helper=", "-c", "credential.interactive=never"]
+    assert "http.extraHeader" not in " ".join(argv)
 

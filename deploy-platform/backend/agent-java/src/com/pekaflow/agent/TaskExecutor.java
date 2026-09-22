@@ -333,7 +333,9 @@ public class TaskExecutor implements StepRunner {
             Map<String, String> env = pb.environment();
             enrichToolPath(env);
             env.put("GIT_TERMINAL_PROMPT", "0");
-            env.put("GIT_ASKPASS", "echo");
+            // 不要 GIT_ASKPASS=echo：git 会把「Password for ...」当密码发给远端
+            env.remove("GIT_ASKPASS");
+            env.remove("SSH_ASKPASS");
             // Windows Git Credential Manager 会弹 GUI，GIT_TERMINAL_PROMPT=0 挡不住
             env.put("GCM_INTERACTIVE", "never");
             env.put("GCM_MODAL_PROMPT", "false");
@@ -537,7 +539,8 @@ public class TaskExecutor implements StepRunner {
             pb.redirectErrorStream(true);
             enrichToolPath(pb.environment());
             pb.environment().put("GIT_TERMINAL_PROMPT", "0");
-            pb.environment().put("GIT_ASKPASS", "echo");
+            pb.environment().remove("GIT_ASKPASS");
+            pb.environment().remove("SSH_ASKPASS");
             // Windows Git Credential Manager 会弹 GUI，GIT_TERMINAL_PROMPT=0 挡不住
             pb.environment().put("GCM_INTERACTIVE", "never");
             pb.environment().put("GCM_MODAL_PROMPT", "false");

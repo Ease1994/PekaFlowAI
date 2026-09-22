@@ -2,7 +2,7 @@
   "name": "git-checkout",
   "display_name": "Git 拉取代码",
   "category": "source",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "language": "python",
   "entrypoint": "python3 task.py",
   "description": "从 Git 仓库拉取指定分支/Tag/Commit 到工作区 src/。在流水线开头要检出代码时用。不是编译，也不是往节点发文件。",

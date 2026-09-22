@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 """git-checkout 插件：Agent 仅执行本入口，不内嵌检出逻辑。
 
-git 一律参数列表 + shell=False，ref 走白名单。仓库 token 只进 git 的
-http.extraHeader，不写进 clone URL。Windows 关掉 Credential Manager 弹窗。
+git 一律参数列表 + shell=False，ref 走白名单。仓库凭证走本次调用的
+git -c http.extraHeader，不写进 clone URL。Windows 关掉 Credential Manager，
+也不用 GIT_ASKPASS=echo（会把提示语当密码发给 GitLab）。
 浅克隆到工作区 src/，不在用户主目录做 bare 镜像缓存。
 """
 from __future__ import annotations
@@ -14,6 +15,7 @@ import re
 import shutil
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 import release_atom_sdk as sdk
@@ -118,42 +120,79 @@ def _split_secret(raw: str, username: str = "") -> tuple[str, str]:
     return user, text
 
 
-def _git_env(token: str = "", username: str = "") -> dict[str, str]:
-    """git 子进程环境。禁止弹窗；token 只出现在 extraHeader，不进 argv 和 clone URL。"""
+def _git_env() -> dict[str, str]:
+    """git 子进程环境：禁止弹窗，禁止交互要密码。
+
+    认证走本次 git -c http.extraHeader。GIT_ASKPASS 不能设成 echo：
+    git 会把提示语当密码发给远端。父进程若带了 ASKPASS，这里摘掉。
+    """
     env = os.environ.copy()
     env["GIT_TERMINAL_PROMPT"] = "0"
-    env["GIT_ASKPASS"] = "echo"
-    # Git for Windows 自带 Credential Manager，会弹 GUI，GIT_TERMINAL_PROMPT=0 挡不住
+    env.pop("GIT_ASKPASS", None)
+    env.pop("SSH_ASKPASS", None)
     env["GCM_INTERACTIVE"] = "never"
     env["GCM_MODAL_PROMPT"] = "false"
     env["GCM_GUI_PROMPT"] = "false"
-    configs: list[tuple[str, str]] = [
-        ("credential.helper", ""),
-        ("credential.interactive", "never"),
-    ]
-    if token:
-        configs.append(("http.extraHeader", _git_auth_header(token, username)))
-    env["GIT_CONFIG_COUNT"] = str(len(configs))
-    for i, (key, value) in enumerate(configs):
-        env[f"GIT_CONFIG_KEY_{i}"] = key
-        env[f"GIT_CONFIG_VALUE_{i}"] = value
     return env
 
 
-def _git_argv(argv: list[str]) -> list[str]:
-    """把 argv[0] 的 git 换成绝对路径，并关掉 credential helper。
+def _git_argv(argv: list[str], token: str = "", username: str = "") -> list[str]:
+    """把 argv[0] 换成 git 绝对路径，关掉 helper，并把 Basic 认证写进本次调用。
 
-    系统 gitconfig 里常写着 helper=manager，只靠环境变量有的版本仍会弹窗。
-    -c 覆盖本次调用。
+    GIT_CONFIG_COUNT 要 Git 2.31+ 才认，构建机上的 Git for Windows 经常更老，
+    extraHeader 只写在环境里等于没写。-c 从 Git 1.7 就认，必须走这条。
     """
     if not argv or argv[0] != "git":
         return argv
-    return [
+    out = [
         find_git(),
         "-c", "credential.helper=",
         "-c", "credential.interactive=never",
-        *argv[1:],
     ]
+    if token:
+        out.extend(["-c", f"http.extraHeader={_git_auth_header(token, username)}"])
+    out.extend(argv[1:])
+    return out
+
+
+def _auth_usernames(username: str) -> list[str]:
+    """HTTPS 认证用户名候选。
+
+    平台注入的可能是真实账号，也可能是 oauth2。GitLab HTTPS 拉代码要 PAT，
+    用户名用 oauth2；账号+登录密码会被拒。先试注入的用户名，再试 oauth2。
+    """
+    user = (username or "").strip()
+    names: list[str] = []
+    if user:
+        names.append(user)
+    if user != "oauth2":
+        names.append("oauth2")
+    return names
+
+
+def _checkout_with_auth(run_once: Callable[[str], bool], username: str) -> bool:
+    """按用户名候选依次尝试 HTTPS 认证。
+
+    run_once: 接受用户名，返回这次检出是否成功。
+    username: 平台注入的仓库用户名；空则只试 oauth2。
+    """
+    for i, user in enumerate(_auth_usernames(username)):
+        if i:
+            sdk.log.warning("当前用户名未通过认证，改用 oauth2（GitLab Token 方式）重试")
+        if run_once(user):
+            return True
+    return False
+
+
+def _log_auth_fail_hint(token: str) -> None:
+    """clone/fetch 失败且已注入凭证时，说明 GitLab HTTPS 要 PAT 而不是登录密码。"""
+    if not token:
+        return
+    sdk.log.error(
+        "若日志是 HTTP Basic Access denied / Authentication failed："
+        "GitLab HTTPS 拉代码必须用 Personal Access Token，不能用登录密码。"
+        "请到「凭证管理」把该仓库凭证改成 Token 类型，密码栏填 PAT（权限含 read_repository）。"
+    )
 
 
 def _valid_ref(ref: str) -> bool:
@@ -170,14 +209,14 @@ def _valid_ref(ref: str) -> bool:
 
 def _run(argv: list[str], cwd: Path, sink=True, token: str = "", username: str = "") -> int:
     """执行一条 git 命令。argv 原样交给 subprocess，shell=False。"""
-    argv = _git_argv(argv)
+    argv = _git_argv(argv, token=token, username=username)
     p = subprocess.Popen(
         argv,
         shell=False,
         cwd=str(cwd),
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
-        env=_git_env(token, username),
+        env=_git_env(),
     )
     assert p.stdout is not None
     for raw in iter(p.stdout.readline, b""):
@@ -191,10 +230,10 @@ def _capture(argv: list[str], cwd: Path, token: str = "", username: str = "") ->
     """跑一条命令，只取第一行 stdout。失败返回 None。"""
     try:
         out = subprocess.check_output(
-            _git_argv(argv),
+            _git_argv(argv, token=token, username=username),
             shell=False,
             cwd=str(cwd),
-            env=_git_env(token, username),
+            env=_git_env(),
             timeout=30,
         )
         text = sdk.decode(out or b"")
@@ -327,35 +366,46 @@ def main() -> int:
         ]
         if strategy == REVERT_UPDATE:
             steps.append(["git", "clean", "-fdx"])
-        ok = _seq(steps, src, repo_token, repo_user)
+        def _fetch_once(user: str) -> bool:
+            """已有工作树时，用指定用户名 fetch + reset。"""
+            return _seq(steps, src, repo_token, user)
+
+        ok = _checkout_with_auth(_fetch_once, repo_user)
+        if not ok:
+            _log_auth_fail_hint(repo_token)
         return 0 if _finish(ok, src) else 1
 
     sdk.log.info(f"浅克隆 {'commit ' if commit_ref else 'branch '}{ref}")
-    _rm_tree(src)
-    if commit_ref:
-        src.mkdir(parents=True, exist_ok=True)
-        ok = _seq(
-            [
-                ["git", "init"],
-                ["git", "remote", "add", "origin", repo_url],
-                ["git", "fetch", "--depth", "1", "--no-tags", "origin", ref],
-                ["git", "checkout", "--detach", "FETCH_HEAD"],
-            ],
-            src,
-            repo_token,
-            repo_user,
-        )
-    else:
-        ok = _run(
+
+    def _clone_once(user: str) -> bool:
+        """按一个用户名浅克隆。失败会留下半成品目录，下次尝试先清掉。"""
+        _rm_tree(src)
+        if commit_ref:
+            src.mkdir(parents=True, exist_ok=True)
+            return _seq(
+                [
+                    ["git", "init"],
+                    ["git", "remote", "add", "origin", repo_url],
+                    ["git", "fetch", "--depth", "1", "--no-tags", "origin", ref],
+                    ["git", "checkout", "--detach", "FETCH_HEAD"],
+                ],
+                src,
+                repo_token,
+                user,
+            )
+        return _run(
             [
                 "git", "clone", "--depth", "1", "--single-branch", "--no-tags",
                 "-b", ref, repo_url, "src",
             ],
             pipeline_dir,
             token=repo_token,
-            username=repo_user,
+            username=user,
         ) == 0
+
+    ok = _checkout_with_auth(_clone_once, repo_user)
     if not ok:
+        _log_auth_fail_hint(repo_token)
         sdk.set_output(
             {
                 "status": sdk.status.FAILURE,
