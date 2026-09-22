@@ -2,13 +2,13 @@
 """git-checkout 插件：Agent 仅执行本入口，不内嵌检出逻辑。
 
 git 一律参数列表 + shell=False，ref 走白名单。仓库 token 只进 git 的
-http.extraHeader 环境变量，不写进 clone URL 的 userinfo，避免出现在进程列表
-和远程 URL 日志里。
+http.extraHeader，不写进 clone URL。Windows 关掉 Credential Manager 弹窗。
+浅克隆到工作区 src/，不在用户主目录做 bare 镜像缓存。
 """
 from __future__ import annotations
 
 import base64
-import hashlib
+import json
 import os
 import re
 import shutil
@@ -88,11 +88,72 @@ def find_git() -> str:
     )
 
 
+def _git_auth_header(secret: str, username: str = "") -> str:
+    """Git HTTPS 的 Authorization 头。
+
+    GitLab 的 git smart-HTTP 只认 HTTP Basic。Token 类型用户名用 oauth2，
+    密码是 PAT；账号密码类型用真实用户名和密码。Bearer 是 REST 用的，
+    git-http-backend 会丢掉，构建机又没有 TTY，就会弹出 Windows 凭据窗口。
+    """
+    user = (username or "").strip() or "oauth2"
+    raw = base64.b64encode(f"{user}:{secret}".encode("utf-8")).decode("ascii")
+    return f"Authorization: Basic {raw}"
+
+
+def _split_secret(raw: str, username: str = "") -> tuple[str, str]:
+    """把注入的凭证拆成用户名和密码。
+
+    账号密码类型在平台里存的是 JSON。若整段被当成 repoToken 传来，
+    不能再塞进 oauth2: 前缀，否则 GitLab 拒认、Windows 就会弹密码框。
+    """
+    text = (raw or "").strip()
+    user = (username or "").strip()
+    if text.startswith("{"):
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError:
+            data = None
+        if isinstance(data, dict) and data.get("password"):
+            return str(data.get("username") or user).strip(), str(data.get("password") or "")
+    return user, text
+
+
+def _git_env(token: str = "", username: str = "") -> dict[str, str]:
+    """git 子进程环境。禁止弹窗；token 只出现在 extraHeader，不进 argv 和 clone URL。"""
+    env = os.environ.copy()
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    env["GIT_ASKPASS"] = "echo"
+    # Git for Windows 自带 Credential Manager，会弹 GUI，GIT_TERMINAL_PROMPT=0 挡不住
+    env["GCM_INTERACTIVE"] = "never"
+    env["GCM_MODAL_PROMPT"] = "false"
+    env["GCM_GUI_PROMPT"] = "false"
+    configs: list[tuple[str, str]] = [
+        ("credential.helper", ""),
+        ("credential.interactive", "never"),
+    ]
+    if token:
+        configs.append(("http.extraHeader", _git_auth_header(token, username)))
+    env["GIT_CONFIG_COUNT"] = str(len(configs))
+    for i, (key, value) in enumerate(configs):
+        env[f"GIT_CONFIG_KEY_{i}"] = key
+        env[f"GIT_CONFIG_VALUE_{i}"] = value
+    return env
+
+
 def _git_argv(argv: list[str]) -> list[str]:
-    """把 argv[0] 的 git 换成绝对路径，避免依赖服务进程那份很窄的 PATH。"""
-    if argv and argv[0] == "git":
-        return [find_git(), *argv[1:]]
-    return argv
+    """把 argv[0] 的 git 换成绝对路径，并关掉 credential helper。
+
+    系统 gitconfig 里常写着 helper=manager，只靠环境变量有的版本仍会弹窗。
+    -c 覆盖本次调用。
+    """
+    if not argv or argv[0] != "git":
+        return argv
+    return [
+        find_git(),
+        "-c", "credential.helper=",
+        "-c", "credential.interactive=never",
+        *argv[1:],
+    ]
 
 
 def _valid_ref(ref: str) -> bool:
@@ -107,30 +168,7 @@ def _valid_ref(ref: str) -> bool:
     return bool(_REF_RE.fullmatch(text))
 
 
-def _git_auth_header(token: str) -> str:
-    """Git 走 HTTPS 时的 Authorization 头。
-
-    GitLab 的 git smart-HTTP 只认 HTTP Basic：用户名任意非空（惯例写 oauth2），
-    密码是仓库 token。Bearer 是 REST API 用的，git-http-backend 会直接丢掉，
-    构建机又没有 TTY 输密码，表现就是 clone 鉴权失败。
-    """
-    raw = base64.b64encode(f"oauth2:{token}".encode("utf-8")).decode("ascii")
-    return f"Authorization: Basic {raw}"
-
-
-def _git_env(token: str = "") -> dict[str, str]:
-    """git 子进程环境。token 只出现在 extraHeader 里，不进 argv 和 clone URL。"""
-    env = os.environ.copy()
-    env["GIT_TERMINAL_PROMPT"] = "0"
-    env["GIT_ASKPASS"] = "echo"
-    if token:
-        env["GIT_CONFIG_COUNT"] = "1"
-        env["GIT_CONFIG_KEY_0"] = "http.extraHeader"
-        env["GIT_CONFIG_VALUE_0"] = _git_auth_header(token)
-    return env
-
-
-def _run(argv: list[str], cwd: Path, sink=True, token: str = "") -> int:
+def _run(argv: list[str], cwd: Path, sink=True, token: str = "", username: str = "") -> int:
     """执行一条 git 命令。argv 原样交给 subprocess，shell=False。"""
     argv = _git_argv(argv)
     p = subprocess.Popen(
@@ -139,7 +177,7 @@ def _run(argv: list[str], cwd: Path, sink=True, token: str = "") -> int:
         cwd=str(cwd),
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
-        env=_git_env(token),
+        env=_git_env(token, username),
     )
     assert p.stdout is not None
     for raw in iter(p.stdout.readline, b""):
@@ -149,14 +187,14 @@ def _run(argv: list[str], cwd: Path, sink=True, token: str = "") -> int:
     return p.wait()
 
 
-def _capture(argv: list[str], cwd: Path, token: str = "") -> str | None:
+def _capture(argv: list[str], cwd: Path, token: str = "", username: str = "") -> str | None:
     """跑一条命令，只取第一行 stdout。失败返回 None。"""
     try:
         out = subprocess.check_output(
             _git_argv(argv),
             shell=False,
             cwd=str(cwd),
-            env=_git_env(token),
+            env=_git_env(token, username),
             timeout=30,
         )
         text = sdk.decode(out or b"")
@@ -173,76 +211,9 @@ def _mask_url(url: str) -> str:
     return re.sub(r"(://[^:]+:)[^@]+@", r"\1***@", url)
 
 
-def _sha1(s: str) -> str:
-    return hashlib.sha1(s.encode("utf-8")).hexdigest()
-
-
 def _rm_tree(path: Path) -> None:
     if path.exists():
         shutil.rmtree(path, ignore_errors=True)
-
-
-def _is_unusable_mirror(mirror: Path) -> bool:
-    if (mirror / "shallow").exists():
-        return True
-    objects = mirror / "objects"
-    return not objects.exists() or not any(objects.iterdir())
-
-
-def _ensure_mirror(repo_key: str, repo_url: str, ref: str, token: str) -> Path | None:
-    home = Path.home() / ".release-agent" / "git-cache"
-    home.mkdir(parents=True, exist_ok=True)
-    mirror = home / f"{_sha1(repo_key)}.git"
-    commit_ref = _is_commit_sha(ref)
-
-    if mirror.exists() and _is_unusable_mirror(mirror):
-        sdk.log.warning("本地 mirror 不可用，重建")
-        _rm_tree(mirror)
-
-    git_dir = ["git", f"--git-dir={mirror}"]
-    if not mirror.exists():
-        sdk.log.info("首次建立本地镜像缓存（仅此一次较慢）")
-        if commit_ref:
-            rc = _run(
-                ["git", "clone", "--bare", "--single-branch", "--no-tags", repo_url, str(mirror)],
-                Path.cwd(),
-                token=token,
-            )
-            if rc != 0:
-                return None
-            _run(git_dir + ["fetch", "--no-tags", "origin", ref], Path.cwd(), token=token)
-        else:
-            rc = _run(
-                [
-                    "git", "clone", "--bare", "--single-branch", "--no-tags",
-                    "-b", ref, repo_url, str(mirror),
-                ],
-                Path.cwd(),
-                token=token,
-            )
-            if rc != 0:
-                # 不能改去拉默认分支：指定的 ref 不存在时，默认分支的代码会当成功检出，
-                # 后面照常编译打包发上生产，日志里只剩一句 clone 失败，非常难查。
-                sdk.log.error(
-                    f"指定的分支/标签「{ref}」拉不下来（仓库里没有，或构建机访问不到）。"
-                    "已终止，不会改去拉默认分支。"
-                )
-                _rm_tree(mirror)
-                return None
-    else:
-        if commit_ref:
-            _run(git_dir + ["fetch", "--no-tags", "origin", ref], Path.cwd(), token=token)
-        else:
-            _run(
-                git_dir + ["fetch", "--no-tags", "origin", f"{ref}:refs/heads/{ref}"],
-                Path.cwd(),
-                token=token,
-            )
-
-    if _is_unusable_mirror(mirror):
-        _rm_tree(mirror)
-        return None
-    return mirror
 
 
 def _finish(ok: bool, src: Path) -> bool:
@@ -272,10 +243,10 @@ def _finish(ok: bool, src: Path) -> bool:
     return True
 
 
-def _seq(steps: list[list[str]], cwd: Path, token: str) -> bool:
+def _seq(steps: list[list[str]], cwd: Path, token: str, username: str = "") -> bool:
     """按顺序跑多条命令，任一条非 0 即停。"""
     for argv in steps:
-        if _run(argv, cwd, token=token) != 0:
+        if _run(argv, cwd, token=token, username=username) != 0:
             return False
     return True
 
@@ -293,7 +264,7 @@ def main() -> int:
         src = pipeline_dir / "src"
 
     repo_url = (inp.get("repoUrl") or inp.get("repo") or "").strip()
-    repo_token = (inp.get("repoToken") or "").strip()
+    repo_user, repo_token = _split_secret(inp.get("repoToken") or "", inp.get("repoUser") or "")
     ref = (inp.get("ref") or inp.get("branch") or "master").strip()
     if not _valid_ref(ref):
         sdk.log.error(f"非法的分支/提交「{ref}」，已拒绝执行")
@@ -330,6 +301,11 @@ def main() -> int:
         f"拉取 {_mask_url(repo_url)}@{ref}"
         f"（{'commit' if commit_ref else 'branch/tag'}） 到 {src}，策略 {strategy}"
     )
+    if not repo_token:
+        sdk.log.warning(
+            "未注入仓库凭证。已禁止 Git 弹窗要密码，私有库会直接失败。"
+            "请在「代码库」绑定凭证后重试。"
+        )
 
     if strategy == FRESH_CHECKOUT and src.exists():
         # 选了全新检出就得真的清干净，否则和增量更新没区别——
@@ -351,41 +327,10 @@ def main() -> int:
         ]
         if strategy == REVERT_UPDATE:
             steps.append(["git", "clean", "-fdx"])
-        ok = _seq(steps, src, repo_token)
+        ok = _seq(steps, src, repo_token, repo_user)
         return 0 if _finish(ok, src) else 1
 
-    mirror = _ensure_mirror(repo_url, repo_url, ref, repo_token)
-    if mirror is not None:
-        sdk.log.info("从本地缓存秒级检出（--reference + --dissociate）")
-        _rm_tree(src)
-        if commit_ref:
-            ok = _seq(
-                [
-                    ["git", "clone", "--no-checkout", str(mirror), "src"],
-                    ["git", "-C", "src", "checkout", "--detach", ref],
-                    ["git", "-C", "src", "remote", "set-url", "origin", repo_url],
-                ],
-                pipeline_dir,
-                repo_token,
-            )
-        else:
-            ok = _run(
-                [
-                    "git", "clone", "--reference", str(mirror), "--dissociate",
-                    "--depth", "1", "--single-branch", "--no-tags",
-                    "-b", ref, repo_url, "src",
-                ],
-                pipeline_dir,
-                token=repo_token,
-            ) == 0
-        if ok:
-            return 0 if _finish(True, src) else 1
-        sdk.log.warning("缓存检出失败，清理后降级")
-        _rm_tree(src)
-        if _is_unusable_mirror(mirror):
-            _rm_tree(mirror)
-
-    sdk.log.info(f"降级检出 {'commit ' if commit_ref else 'branch '}{ref}")
+    sdk.log.info(f"浅克隆 {'commit ' if commit_ref else 'branch '}{ref}")
     _rm_tree(src)
     if commit_ref:
         src.mkdir(parents=True, exist_ok=True)
@@ -398,6 +343,7 @@ def main() -> int:
             ],
             src,
             repo_token,
+            repo_user,
         )
     else:
         ok = _run(
@@ -407,6 +353,7 @@ def main() -> int:
             ],
             pipeline_dir,
             token=repo_token,
+            username=repo_user,
         ) == 0
     if not ok:
         sdk.set_output(

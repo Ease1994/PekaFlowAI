@@ -111,7 +111,7 @@ def create_tasks_for_release(
     """
     from app.core.security import decrypt
     from app.modules.credential.models import Credential
-    from app.modules.credential.service import inject_registry_login, inject_ssh_login
+    from app.modules.credential.service import docker_login, inject_registry_login, inject_ssh_login
     from app.modules.pipeline.models import Pipeline, Release
     from app.modules.pipeline.service import ensure_pipeline_workspace_uuid
     from app.modules.pipeline.variables import build_context as build_variable_context
@@ -205,7 +205,7 @@ def create_tasks_for_release(
                             cred = db.get(Credential, repo.credential_id)
                             if cred is not None:
                                 try:
-                                    step_with["repoToken"] = decrypt(cred.ciphertext, cred.iv)
+                                    plain = decrypt(cred.ciphertext, cred.iv)
                                 except Exception as exc:  # noqa: BLE001
                                     # 塞空 token 只会让私有库在 Agent 上报一句看不懂的 git 认证错误，
                                     # 真正的原因（密钥换了、密文坏了）反而被埋掉
@@ -213,6 +213,17 @@ def create_tasks_for_release(
                                         f"代码库「{repo.alias or repo.name}」关联的凭证解密失败，"
                                         "无法拉取私有仓库。请到「凭证管理」重新录入该凭证。"
                                     ) from exc
+                                user, secret = docker_login(plain, cred.type or "token")
+                                if (cred.type or "token").strip() == "token":
+                                    secret = secret or plain
+                                    user = user or "oauth2"
+                                if not secret:
+                                    raise BizException.bad_request(
+                                        f"代码库「{repo.alias or repo.name}」关联的凭证没有密码或 Token，"
+                                        "无法拉取私有仓库。请到「凭证管理」重新录入。"
+                                    )
+                                step_with["repoUser"] = user or "oauth2"
+                                step_with["repoToken"] = secret
                 # 变量替换：仓库地址注入完再统一渲染
                 step_with = render_variables(step_with, var_values)
                 _assert_no_leftover_vars(pipeline.name, s.name or s.plugin, step_with)
