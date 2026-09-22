@@ -68,18 +68,10 @@ def _perform_action(
             source_ref=payload.get("source_ref"),
             run_params=run_params,
         )
-        if not release.source_ref:
-            try:
-                from app.modules.pipeline import source_ref_service
+        if not (release.source_ref or "").strip():
+            from app.modules.pipeline import source_ref_service
 
-                pipeline = service.get_pipeline(db, release.pipeline_id)
-                auto_ref = source_ref_service.resolve_source_ref(db, pipeline)
-                if auto_ref:
-                    release.source_ref = auto_ref
-                    db.commit()
-                    db.refresh(release)
-            except Exception:  # noqa: BLE001
-                pass
+            source_ref_service.fill_source_ref_later(release.id)
         start_err = ""
         if release.status == "queued":
             release, start_err = service.try_execute_release(db, release.id)
