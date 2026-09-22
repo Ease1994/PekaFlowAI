@@ -457,26 +457,32 @@ export default function PipelineEditor() {
       (basic.description || '') !== (pipeline.description || '') ||
       basic.approval_mode !== (pipeline.approval_mode || 'inherit'))
 
+  /** 把画布和基础设置写回服务器，不弹成功提示。保存并执行要接着发发布单，中途弹「已保存」会让人以为结束了。 */
+  const persistGraph = async () => {
+    if (basicDirty && !basic.name.trim()) throw new Error(t('pipe.nameRequired'))
+    if (!graph) throw new Error(t('pipe.graphNotReady'))
+    const cuts = pruneOpenCuts(graph.stages, graph.open_cuts)
+    if (cuts.length) throw new Error(OPEN_CUTS_SAVE_ERROR())
+    await put<Pipeline>(`/pipelines/${pipelineId}/graph`, { ...graph, open_cuts: cuts })
+    if (basicDirty) {
+      await put(`/pipelines/${pipelineId}`, {
+        name: basic.name.trim(),
+        description: basic.description || '',
+        approval_mode: basic.approval_mode,
+      })
+    }
+  }
+
+  const invalidatePipeline = () => {
+    queryClient.invalidateQueries({ queryKey: ['pipeline', pipelineId] })
+    queryClient.invalidateQueries({ queryKey: ['pipelines'] })
+  }
+
   const saveMutation = useMutation({
-    mutationFn: async () => {
-      if (basicDirty && !basic.name.trim()) throw new Error(t('pipe.nameRequired'))
-      if (!graph) throw new Error(t('pipe.graphNotReady'))
-      const cuts = pruneOpenCuts(graph.stages, graph.open_cuts)
-      if (cuts.length) throw new Error(OPEN_CUTS_SAVE_ERROR())
-      // 把当前断开记录原样交给后端；有值时后端也会拒，避免只靠前端拦住
-      await put<Pipeline>(`/pipelines/${pipelineId}/graph`, { ...graph, open_cuts: cuts })
-      if (basicDirty) {
-        await put(`/pipelines/${pipelineId}`, {
-          name: basic.name.trim(),
-          description: basic.description || '',
-          approval_mode: basic.approval_mode,
-        })
-      }
-    },
+    mutationFn: persistGraph,
     onSuccess: () => {
       message.success(basicDirty ? t('pipe.savedWithBasic') : t('pipe.savedGraph'))
-      queryClient.invalidateQueries({ queryKey: ['pipeline', pipelineId] })
-      queryClient.invalidateQueries({ queryKey: ['pipelines'] })
+      invalidatePipeline()
     },
     onError: (e: Error) => message.error(e.message || t('pipe.saveFailed')),
   })
@@ -499,12 +505,13 @@ export default function PipelineEditor() {
     })
   }
 
-  const releaseMutation = useMutation({
-    mutationFn: () => {
+  /** 先落编排再发起发布，一次转圈等到发布单创建返回。Git SHA / 企微由后端后台补，不阻塞。 */
+  const saveAndRunMutation = useMutation({
+    mutationFn: async () => {
+      await persistGraph()
       const body: Record<string, unknown> = {
         pipeline_id: Number(pipelineId),
         version: releaseVersion,
-        // 代码版本（commit SHA）由后端自动从 git-checkout 步骤拉取，Rebuild 复用
         strategy: 'rolling',
         trigger_by: 'manual',
       }
@@ -523,6 +530,7 @@ export default function PipelineEditor() {
       setReleaseModalOpen(false)
       setReleaseBypass(false)
       setReleaseBypassReason('')
+      invalidatePipeline()
       if (!r) return
       const num = r.build_number || r.id
       if (r.status === 'failed' || (res.message && res.message !== 'ok' && res.message.includes(t('pipe.startFailedToken')))) {
@@ -534,9 +542,9 @@ export default function PipelineEditor() {
       } else {
         message.success(t('pipe.queued'))
       }
-      // 跳转到本流水线的发布记录/执行详情（不要进管理员用的「发布管理」）
       navigate(`/executions/${pipelineId}/${r.id}`)
     },
+    onError: (e: Error) => message.error(e.message || t('pipe.saveFailed')),
   })
 
   const editorActions: EditorCanvasActions = useMemo(
@@ -963,17 +971,14 @@ export default function PipelineEditor() {
       <Modal
         title={t("pipe.saveAndRun")}
         open={releaseModalOpen}
-        onOk={() => {
-          saveMutation.mutate(undefined, {
-            onSuccess: () => releaseMutation.mutate(),
-          })
-        }}
+        onOk={() => saveAndRunMutation.mutate()}
         onCancel={() => {
+          if (saveAndRunMutation.isPending) return
           setReleaseModalOpen(false)
           setReleaseBypass(false)
           setReleaseBypassReason('')
         }}
-        confirmLoading={saveMutation.isPending || releaseMutation.isPending}
+        confirmLoading={saveAndRunMutation.isPending}
         okText={
           needReleaseApproval ? (releaseBypass ? t('pipe.saveEmergency') : t('pipe.saveSubmit')) : t('pipe.saveAndRun')
         }

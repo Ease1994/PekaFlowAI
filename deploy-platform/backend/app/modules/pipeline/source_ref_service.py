@@ -1,13 +1,13 @@
 """自动获取流水线 source_ref（commit SHA）及代码变更区间。
 
-逻辑：
-- 发布时若未传 source_ref，可尝试调 GitLab/GitHub API 解析（失败不影响发布）
-- Agent 拉代码后回写 source_ref 更可靠
-- 代码变更：优先 compare 区间；失败或首次发布则用「单 commit」API 拉详情
+发布接口不能同步去问 Git 托管：内网 GitLab 慢或不可达时，保存并执行会一直转圈。
+创建发布单先返回，SHA 放到后台补；检出步骤跑完 Agent 也会回写。
+代码变更：优先 compare 区间；失败或首次发布则用「单 commit」API 拉详情。
 """
 from __future__ import annotations
 
 import json
+import threading
 import urllib.parse
 
 import httpx
@@ -201,6 +201,44 @@ def _fetch_github_commit_detail(
     except Exception as e:  # noqa: BLE001
         print(f"[source_ref_service] GitHub commit 请求异常: {e}")
         return None
+
+
+def fill_source_ref_later(release_id: int) -> None:
+    """发布单落库后再去仓库问 SHA，不占用创建接口。
+
+    GitLab/GitHub 超时或失败只记日志；已经有 source_ref（调用方传入或 Agent 回写）就不再覆盖。
+    """
+    threading.Thread(
+        target=_fill_source_ref,
+        args=(int(release_id),),
+        name=f"source-ref-{release_id}",
+        daemon=True,
+    ).start()
+
+
+def _fill_source_ref(release_id: int) -> None:
+    """后台补写一次 commit SHA。"""
+    from app.db.session import SessionLocal
+    from app.modules.pipeline.models import Pipeline, Release
+
+    try:
+        with SessionLocal() as db:
+            r = db.get(Release, release_id)
+            if r is None or (r.source_ref or "").strip():
+                return
+            pipe = db.get(Pipeline, r.pipeline_id)
+            if pipe is None:
+                return
+            auto_ref = resolve_source_ref(db, pipe)
+            if not auto_ref:
+                return
+            db.refresh(r)
+            if (r.source_ref or "").strip():
+                return
+            r.source_ref = auto_ref
+            db.commit()
+    except Exception as e:  # noqa: BLE001
+        print(f"[source_ref_service] 后台补写 source_ref 失败 release={release_id}: {e}")
 
 
 def resolve_source_ref(db, pipeline) -> str | None:
