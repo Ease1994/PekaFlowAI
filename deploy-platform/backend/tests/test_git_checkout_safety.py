@@ -56,9 +56,37 @@ def test_run_uses_argv_not_shell():
     # token 不进 clone URL；GitLab git-http 要的是 Basic oauth2:token，不是 Bearer
     assert "https://oauth2:" not in src
     env = task._git_env("s3cret")
-    header = env["GIT_CONFIG_VALUE_0"]
+    header = env["GIT_CONFIG_VALUE_2"]
     assert header.startswith("Authorization: Basic ")
     assert "Bearer" not in header
     decoded = base64.b64decode(header.split()[-1]).decode("utf-8")
     assert decoded == "oauth2:s3cret"
-    assert env["GIT_CONFIG_KEY_0"] == "http.extraHeader"
+    assert env["GIT_CONFIG_KEY_2"] == "http.extraHeader"
+    assert env["GCM_INTERACTIVE"] == "never"
+    assert env["GIT_CONFIG_KEY_0"] == "credential.helper"
+    assert env["GIT_CONFIG_VALUE_0"] == ""
+
+
+def test_password_json_uses_real_username():
+    """账号密码凭证不能再被当成 oauth2:整段 JSON。"""
+    import base64
+
+    task = _load("git-checkout")
+    user, secret = task._split_secret('{"username":"kang","password":"p@ss"}', "")
+    assert user == "kang"
+    assert secret == "p@ss"
+    env = task._git_env(secret, user)
+    decoded = base64.b64decode(env["GIT_CONFIG_VALUE_2"].split()[-1]).decode("utf-8")
+    assert decoded == "kang:p@ss"
+
+
+def test_no_home_git_cache(monkeypatch):
+    """构建机家目录不再做 bare 镜像，避免占满 C 盘。"""
+    task = _load("git-checkout")
+    src = Path(task.__file__).read_text(encoding="utf-8")
+    assert "git-cache" not in src
+    assert "_ensure_mirror" not in src
+    monkeypatch.setattr(task, "find_git", lambda: "git")
+    argv = task._git_argv(["git", "clone", "https://example.com/r.git"])
+    assert argv[1:5] == ["-c", "credential.helper=", "-c", "credential.interactive=never"]
+

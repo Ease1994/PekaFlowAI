@@ -334,6 +334,10 @@ public class TaskExecutor implements StepRunner {
             enrichToolPath(env);
             env.put("GIT_TERMINAL_PROMPT", "0");
             env.put("GIT_ASKPASS", "echo");
+            // Windows Git Credential Manager 会弹 GUI，GIT_TERMINAL_PROMPT=0 挡不住
+            env.put("GCM_INTERACTIVE", "never");
+            env.put("GCM_MODAL_PROMPT", "false");
+            env.put("GCM_GUI_PROMPT", "false");
             env.put("RELEASE_WORKSPACE", pipelineDir.getAbsolutePath());
             env.put("RELEASE_SRC", srcDir.getAbsolutePath());
             env.put("BK_CI_WORKSPACE", pipelineDir.getAbsolutePath());
@@ -533,6 +537,11 @@ public class TaskExecutor implements StepRunner {
             pb.redirectErrorStream(true);
             enrichToolPath(pb.environment());
             pb.environment().put("GIT_TERMINAL_PROMPT", "0");
+            pb.environment().put("GIT_ASKPASS", "echo");
+            // Windows Git Credential Manager 会弹 GUI，GIT_TERMINAL_PROMPT=0 挡不住
+            pb.environment().put("GCM_INTERACTIVE", "never");
+            pb.environment().put("GCM_MODAL_PROMPT", "false");
+            pb.environment().put("GCM_GUI_PROMPT", "false");
 
             final Process process = pb.start();
             currentProcess = process;
