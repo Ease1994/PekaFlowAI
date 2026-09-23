@@ -14,7 +14,6 @@ from app.modules.agent.models import BuildAgent, NodeGroupMember
 from app.modules.agent.presence import agent_is_online
 from app.modules.agent.router import (
     _effective_status,
-    confirm_uninstalled,
     delete_agent,
     heartbeat,
     register_agent,
@@ -95,23 +94,14 @@ def test_uninstall_then_heartbeat_then_delete():
     assert db.get(BuildAgent, a.id) is None
 
 
-def test_confirm_uninstalled_rejects_while_heartbeat_fresh():
-    """还在心跳时不能「确认已卸载」，否则名单一删 Agent 会重新注册。"""
-    db = _db()
-    a = _agent(db)
-    request_uninstall(a.id, db, ADMIN)
-    with pytest.raises(BizException):
-        confirm_uninstalled(a.id, db, ADMIN)
-
-
-def test_offline_confirm_then_delete():
-    """离线机器收不到指令：管理员确认已在机器上停掉后才能删除。"""
+def test_offline_uninstall_completes_immediately():
+    """当时不在心跳的机器收不到指令，点卸载即记为卸完，可以删除。"""
     db = _db()
     a = _agent(db, last_heartbeat=datetime.now() - timedelta(minutes=10), status="offline")
     request_uninstall(a.id, db, ADMIN)
-    confirm_uninstalled(a.id, db, ADMIN)
     db.refresh(a)
     assert a.uninstalled_at is not None
+    assert _effective_status(a) == "uninstalled"
     delete_agent(a.id, db, ADMIN)
     assert db.get(BuildAgent, a.id) is None
 

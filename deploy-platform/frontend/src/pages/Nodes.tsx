@@ -377,21 +377,6 @@ export default function Nodes() {
     message.success(res.message || t('nodes.uninstallQueued'))
   }
 
-  const handleConfirmUninstalled = (node: BuildAgent) => {
-    Modal.confirm({
-      title: t('nodes.confirmUninstalledTitle', { name: node.name }),
-      content: t('nodes.confirmUninstalledBody'),
-      okText: t('nodes.confirmUninstalled'),
-      okButtonProps: { danger: true },
-      cancelText: t('common.cancel'),
-      onOk: async () => {
-        await post(`/agents/${node.id}/uninstall/confirm`)
-        refresh()
-        message.success(t('nodes.uninstalledHint'))
-      },
-    })
-  }
-
   const renderCommand = (): { cmd: string; note: string } | null => {
     const v = form.getFieldsValue()
     if (!v.name || !v.allowPaths) return null
@@ -748,11 +733,6 @@ export default function Nodes() {
               </Button>
             </Popconfirm>
           )}
-          {r.uninstall_requested && !r.uninstalled ? (
-            <Button size="small" onClick={() => handleConfirmUninstalled(r)}>
-              {t('nodes.confirmUninstalled')}
-            </Button>
-          ) : null}
           {r.uninstalled ? (
             <Button size="small" icon={<RedoOutlined />} onClick={() => openEdit(r)}>
               {t('nodes.reinstall')}

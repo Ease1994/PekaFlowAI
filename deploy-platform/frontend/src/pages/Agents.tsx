@@ -103,21 +103,6 @@ export default function Agents() {
     message.success(res.message || t('agents.uninstallQueued'))
   }
 
-  const handleConfirmUninstalled = (r: BuildAgent) => {
-    Modal.confirm({
-      title: t('agents.confirmUninstalledTitle', { name: r.name }),
-      content: t('agents.confirmUninstalledBody'),
-      okText: t('agents.confirmUninstalled'),
-      okButtonProps: { danger: true },
-      cancelText: t('common.cancel'),
-      onOk: async () => {
-        await post(`/agents/${r.id}/uninstall/confirm`)
-        queryClient.invalidateQueries({ queryKey: ['agents', 'builder'] })
-        message.success(t('agents.uninstalledHint'))
-      },
-    })
-  }
-
   /**
    * 打开重新安装弹窗。名称和环境沿用原登记，到机器上跑命令后会清掉卸载状态重新上线。
    */
@@ -416,11 +401,6 @@ export default function Agents() {
               </Button>
             </Popconfirm>
           )}
-          {r.uninstall_requested && !r.uninstalled ? (
-            <Button size="small" onClick={() => handleConfirmUninstalled(r)}>
-              {t('agents.confirmUninstalled')}
-            </Button>
-          ) : null}
           {r.uninstalled ? (
             <Button size="small" icon={<RedoOutlined />} onClick={() => openReinstall(r)}>
               {t('agents.reinstall')}
