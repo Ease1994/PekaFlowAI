@@ -9,8 +9,12 @@ import java.util.Map;
 /**
  * 按平台心跳里的 should_uninstall 卸掉本机 Agent。
  *
- * 顺序：先留下卸载标记（守护拉起时还能接着卸）→ 向平台报卸完 → 停计划任务 /
- * systemd → 删登记凭据 → 退出。站点目录、备份根、自定义工作空间不删。
+ * 顺序：写下卸载标记 → 向平台报卸完 → 删登记凭据 → 停计划任务 / systemd。
+ * 凭据必须在停守护之前删掉：Linux 的 disable --now 会把当前进程杀掉，
+ * 停完再删就来不及。站点目录、备份根、自定义工作空间不删。
+ *
+ * 守护若没停掉，进程挂起不再心跳，避免 systemd / 计划任务把卸到一半的
+ * Agent 重新拉起来冲掉「已卸载」状态。
  */
 public final class Uninstaller {
 
@@ -78,8 +82,11 @@ public final class Uninstaller {
             config.agentId = agentIdFromMarker(config);
         }
         reportUninstalled(config, api);
-        stopWatchdog(config);
         deleteCredentials(config);
+        if (!stopWatchdog(config)) {
+            System.err.println("[agent] 守护没停掉，进程挂起以免被重新拉起。请到机器上手动停服务。");
+            parkForever();
+        }
         System.out.println("[agent] 本机守护已停、登记凭据已删。站点目录和备份未动。");
     }
 
@@ -100,21 +107,25 @@ public final class Uninstaller {
         }
     }
 
-    /** 停掉开机自启。必须在删凭据之前，否则守护会带着旧凭据重新注册。 */
-    private static void stopWatchdog(Config config) {
+    /**
+     * 停掉开机自启。
+     *
+     * @return 守护命令成功退出则为 true；失败时调用方应挂起进程，不能直接退出
+     */
+    private static boolean stopWatchdog(Config config) {
         boolean windows = "windows".equals(config.os);
         boolean node = "node".equals(config.role);
         if (windows) {
             String task = node ? "RELEASE-Node-Agent" : "RELEASE-Build-Agent";
-            runQuiet("schtasks.exe", "/Delete", "/TN", task, "/F");
-            return;
+            return runQuiet("schtasks.exe", "/Delete", "/TN", task, "/F");
         }
         if (node) {
-            runQuiet("sudo", "-n", "systemctl", "disable", "--now", "rp-node");
-            runQuiet("systemctl", "disable", "--now", "rp-node");
-            return;
+            if (runQuiet("sudo", "-n", "systemctl", "disable", "--now", "rp-node")) {
+                return true;
+            }
+            return runQuiet("systemctl", "disable", "--now", "rp-node");
         }
-        runQuiet("systemctl", "disable", "--now", "release-agent");
+        return runQuiet("systemctl", "disable", "--now", "release-agent");
     }
 
     /** 删掉续期 token，避免卸完后被拉起来又自动登记回来。 */
@@ -133,14 +144,30 @@ public final class Uninstaller {
         }
     }
 
-    private static void runQuiet(String... cmd) {
+    /**
+     * 守护没停掉时挂起：进程还在，systemd Restart=always / 计划任务就不会再拉一份。
+     * 不再心跳，平台侧保持「已卸载」。
+     */
+    private static void parkForever() {
+        while (true) {
+            try {
+                Thread.sleep(3600000L);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+    }
+
+    /** 执行停守护命令。成功（退出码 0）返回 true。 */
+    private static boolean runQuiet(String... cmd) {
         try {
             ProcessBuilder pb = new ProcessBuilder(cmd);
             pb.redirectErrorStream(true);
             Process p = pb.start();
-            p.waitFor();
+            return p.waitFor() == 0;
         } catch (Exception e) {
             System.err.println("[agent] 停守护失败（" + join(cmd) + "）: " + e.getMessage());
+            return false;
         }
     }
 

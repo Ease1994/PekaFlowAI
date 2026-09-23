@@ -186,6 +186,16 @@ $bak  = Join-Path $work 'deploy-agent.jar.bak'
 $wlog = Join-Path $work 'watchdog.log'
 Set-Location -LiteralPath $work
 
+# 平台下发卸载后 jar 会写下这个标记。看到就不再拉起，并删掉本计划任务。
+if (Test-Path -LiteralPath (Join-Path $work 'uninstall.requested')) {
+    try {
+        '{0}  收到卸载标记，不再拉起' -f (Get-Date -Format 'MM-dd HH:mm:ss') |
+            Add-Content -LiteralPath $wlog -Encoding UTF8
+    } catch { }
+    try { schtasks.exe /Delete /TN 'RELEASE-Build-Agent' /F | Out-Null } catch { }
+    exit 0
+}
+
 function Note($m) {
     try {
         '{0}  {1}' -f (Get-Date -Format 'MM-dd HH:mm:ss'), $m | Add-Content -LiteralPath $wlog -Encoding UTF8
