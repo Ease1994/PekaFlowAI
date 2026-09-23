@@ -477,10 +477,10 @@ curl -fsSL -H "X-Enroll-Token: ${ENROLL_TOKEN}" -o "${WORK_DIR}/deploy-agent.jar
     "${SERVER}/api/v1/agents/download" \
     || die "下载 jar 失败：请确认平台地址可达、接入凭证正确（凭证轮换后要用新的）"
 verify_agent_jar "${WORK_DIR}/deploy-agent.jar"
-# 清掉上一轮自升级的残留：留着 .new 的话，systemd 下次启动会把它换上去，
-# 刚下的这份新 jar 反而被顶掉——重装完版本却退回去了，没人想得通
+# 清掉上次留下的换包文件和卸载标记。重装就是再装一次：
+# 留着 .new 会把刚下的 jar 顶掉；留着 uninstall.requested 会让守护一启动又把 Agent 卸掉。
 rm -f "${WORK_DIR}/deploy-agent.jar.new" "${WORK_DIR}/deploy-agent.jar.bak" \
-      "${WORK_DIR}/deploy-agent.upgrade-attempt"
+      "${WORK_DIR}/deploy-agent.upgrade-attempt" "${WORK_DIR}/uninstall.requested"
 chown "$RUN_USER" "${WORK_DIR}/deploy-agent.jar"
 echo "      $(ls -lh "${WORK_DIR}/deploy-agent.jar" | awk '{print $5}')  deploy-agent.jar"
 
@@ -500,7 +500,8 @@ BAK="$WD/deploy-agent.jar.bak"
 
 if [ -f "$WD/uninstall.requested" ]; then
     sudo -n systemctl disable --now rp-node >/dev/null 2>&1 || true
-    exit 0
+    # disable 成功会把本服务停掉。没停掉就挂起，避免 Restart=always 空转把机器打满。
+    while true; do sleep 3600; done
 fi
 
 if [ -f "$NEW" ]; then

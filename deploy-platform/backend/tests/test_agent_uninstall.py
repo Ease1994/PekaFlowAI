@@ -106,3 +106,32 @@ def test_offline_confirm_then_delete():
     assert a.uninstalled_at is not None
     delete_agent(a.id, db, ADMIN)
     assert db.get(BuildAgent, a.id) is None
+
+
+def test_uninstalled_report_ignored_without_request():
+    """没点卸载时，心跳带 uninstalled 不能把自己变成可删除。"""
+    db = _db()
+    a = _agent(db)
+    heartbeat(a.id, db, x_agent_token=PLAIN, payload={"uninstalled": True})
+    db.refresh(a)
+    assert a.uninstalled_at is None
+    with pytest.raises(BizException) as exc:
+        delete_agent(a.id, db, ADMIN)
+    assert "请先卸载" in exc.value.message
+
+
+def test_heartbeat_after_uninstalled_does_not_refresh_presence():
+    """卸完后的 ping 不再刷新心跳时间，也不改回在线。"""
+    db = _db()
+    a = _agent(db)
+    request_uninstall(a.id, db, ADMIN)
+    heartbeat(a.id, db, x_agent_token=PLAIN, payload={"uninstalled": True})
+    db.refresh(a)
+    stamped = a.uninstalled_at
+    last = a.last_heartbeat
+    assert stamped is not None
+    heartbeat(a.id, db, x_agent_token=PLAIN, payload={"running_count": 0})
+    db.refresh(a)
+    assert a.uninstalled_at == stamped
+    assert a.last_heartbeat == last
+    assert _effective_status(a) == "uninstalled"
