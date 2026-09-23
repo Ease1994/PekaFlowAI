@@ -2,8 +2,9 @@
 """git-checkout 插件：Agent 仅执行本入口，不内嵌检出逻辑。
 
 git 一律参数列表 + shell=False，ref 走白名单。仓库凭证走本次调用的
-git -c http.extraHeader，不写进 clone URL。Windows 关掉 Credential Manager，
-也不用 GIT_ASKPASS=echo（会把提示语当密码发给 GitLab）。
+git -c http.extraHeader，不写进 clone URL。不关闭 credential.helper，
+已有工作树的 fetch 可继续用本机已存凭据；新 clone 靠 extraHeader 认证，
+弹窗靠 GCM_INTERACTIVE=never。不用 GIT_ASKPASS=echo。
 浅克隆到工作区 src/，不在用户主目录做 bare 镜像缓存。
 """
 from __future__ import annotations
@@ -137,16 +138,16 @@ def _git_env() -> dict[str, str]:
 
 
 def _git_argv(argv: list[str], token: str = "", username: str = "") -> list[str]:
-    """把 argv[0] 换成 git 绝对路径，关掉 helper，并把 Basic 认证写进本次调用。
+    """把 argv[0] 换成 git 绝对路径，并把 Basic 认证写进本次调用。
 
-    GIT_CONFIG_COUNT 要 Git 2.31+ 才认，构建机上的 Git for Windows 经常更老，
-    extraHeader 只写在环境里等于没写。-c 从 Git 1.7 就认，必须走这条。
+    认证必须用 -c http.extraHeader。不关闭 credential.helper：已有工作树
+    的 fetch 可以继续用本机已保存的 GitLab 凭据。新 clone 靠 extraHeader，
+    弹窗靠 GCM_INTERACTIVE=never。
     """
     if not argv or argv[0] != "git":
         return argv
     out = [
         find_git(),
-        "-c", "credential.helper=",
         "-c", "credential.interactive=never",
     ]
     if token:
@@ -158,15 +159,12 @@ def _git_argv(argv: list[str], token: str = "", username: str = "") -> list[str]
 def _auth_usernames(username: str) -> list[str]:
     """HTTPS 认证用户名候选。
 
-    平台注入的可能是真实账号，也可能是 oauth2。GitLab HTTPS 拉代码要 PAT，
-    用户名用 oauth2；账号+登录密码会被拒。先试注入的用户名，再试 oauth2。
+    GitLab HTTPS 拉代码认 oauth2 + PAT。先试 oauth2，再试平台注入的用户名。
     """
     user = (username or "").strip()
-    names: list[str] = []
-    if user:
+    names = ["oauth2"]
+    if user and user != "oauth2":
         names.append(user)
-    if user != "oauth2":
-        names.append("oauth2")
     return names
 
 
@@ -178,7 +176,7 @@ def _checkout_with_auth(run_once: Callable[[str], bool], username: str) -> bool:
     """
     for i, user in enumerate(_auth_usernames(username)):
         if i:
-            sdk.log.warning("当前用户名未通过认证，改用 oauth2（GitLab Token 方式）重试")
+            sdk.log.warning("oauth2 未通过认证，改用平台注入的用户名重试")
         if run_once(user):
             return True
     return False

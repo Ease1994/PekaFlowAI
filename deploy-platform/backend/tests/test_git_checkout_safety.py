@@ -61,11 +61,12 @@ def test_run_uses_argv_not_shell(monkeypatch):
         token="s3cret",
         username="",
     )
-    header = argv[6]
+    header = argv[4]
     assert header.startswith("http.extraHeader=Authorization: Basic ")
     decoded = base64.b64decode(header.split()[-1]).decode("utf-8")
     assert decoded == "oauth2:s3cret"
     assert "Bearer" not in header
+    assert "credential.helper=" not in argv
     env = task._git_env()
     assert env["GCM_INTERACTIVE"] == "never"
     assert "GIT_ASKPASS" not in env
@@ -82,7 +83,7 @@ def test_password_json_uses_real_username(monkeypatch):
     assert secret == "p@ss"
     monkeypatch.setattr(task, "find_git", lambda: "git")
     argv = task._git_argv(["git", "fetch", "origin"], token=secret, username=user)
-    decoded = base64.b64decode(argv[6].split()[-1]).decode("utf-8")
+    decoded = base64.b64decode(argv[4].split()[-1]).decode("utf-8")
     assert decoded == "kang:p@ss"
 
 
@@ -97,9 +98,9 @@ def test_parent_askpass_echo_stripped(monkeypatch):
 
 
 def test_auth_usernames_retries_oauth2():
-    """真实用户名失败后还要试 oauth2，GitLab PAT 才认这个用户名。"""
+    """GitLab PAT 先用 oauth2，再试平台注入的真实用户名。"""
     task = _load("git-checkout")
-    assert task._auth_usernames("kang") == ["kang", "oauth2"]
+    assert task._auth_usernames("kang") == ["oauth2", "kang"]
     assert task._auth_usernames("oauth2") == ["oauth2"]
     assert task._auth_usernames("") == ["oauth2"]
 
@@ -112,6 +113,7 @@ def test_no_home_git_cache(monkeypatch):
     assert "_ensure_mirror" not in src
     monkeypatch.setattr(task, "find_git", lambda: "git")
     argv = task._git_argv(["git", "clone", "https://example.com/r.git"])
-    assert argv[1:5] == ["-c", "credential.helper=", "-c", "credential.interactive=never"]
+    assert argv[1:3] == ["-c", "credential.interactive=never"]
+    assert "credential.helper=" not in argv
     assert "http.extraHeader" not in " ".join(argv)
 
