@@ -1,0 +1,108 @@
+"""构建机 / 节点：先卸载，卸完才能删除登记。"""
+from __future__ import annotations
+
+from datetime import datetime, timedelta
+
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
+
+from app.core.deps import CurrentUser
+from app.core.response import BizException
+from app.db.base import Base
+from app.modules.agent.models import BuildAgent, NodeGroupMember
+from app.modules.agent.presence import agent_is_online
+from app.modules.agent.router import (
+    _effective_status,
+    confirm_uninstalled,
+    delete_agent,
+    heartbeat,
+    request_uninstall,
+)
+from app.modules.agent.tokens import hash_agent_token
+from app.modules.audit.models import AuditLog
+from app.modules.auth.models import Permission
+
+ADMIN = CurrentUser(id=1, username="admin", is_admin=True)
+PLAIN = "a" * 64
+
+
+def _db() -> Session:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(
+        engine,
+        tables=[BuildAgent.__table__, NodeGroupMember.__table__, AuditLog.__table__, Permission.__table__],
+    )
+    return Session(engine)
+
+
+def _agent(db: Session, **kw) -> BuildAgent:
+    """在线构建机，默认刚心跳过。"""
+    now = datetime.now()
+    status = kw.pop("status", "online")
+    row = BuildAgent(
+        name=kw.pop("name", "win-C#"),
+        role=kw.pop("role", "builder"),
+        status=status,
+        last_heartbeat=kw.pop("last_heartbeat", now),
+        token=hash_agent_token(PLAIN),
+        agent_version="abc123abc123",
+        **kw,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def test_delete_refuses_before_uninstall():
+    """没卸完不能删登记，避免名单没了机器上 Agent 还在。"""
+    db = _db()
+    a = _agent(db)
+    with pytest.raises(BizException) as exc:
+        delete_agent(a.id, db, ADMIN)
+    assert "请先卸载" in exc.value.message
+
+
+def test_uninstall_then_heartbeat_then_delete():
+    """在线卸载：心跳带回 should_uninstall，Agent 上报 uninstalled 后才允许删除。"""
+    db = _db()
+    a = _agent(db)
+    request_uninstall(a.id, db, ADMIN)
+    db.refresh(a)
+    assert a.uninstall_requested_at is not None
+    assert _effective_status(a) == "uninstalling"
+    assert not agent_is_online(a)
+
+    hb = heartbeat(a.id, db, x_agent_token=PLAIN, payload={"running_count": 0})
+    assert hb.data["should_uninstall"] is True
+    assert hb.data["should_upgrade"] is False
+
+    heartbeat(a.id, db, x_agent_token=PLAIN, payload={"uninstalled": True})
+    db.refresh(a)
+    assert a.uninstalled_at is not None
+    assert _effective_status(a) == "uninstalled"
+
+    delete_agent(a.id, db, ADMIN)
+    assert db.get(BuildAgent, a.id) is None
+
+
+def test_confirm_uninstalled_rejects_while_heartbeat_fresh():
+    """还在心跳时不能「确认已卸载」，否则名单一删 Agent 会重新注册。"""
+    db = _db()
+    a = _agent(db)
+    request_uninstall(a.id, db, ADMIN)
+    with pytest.raises(BizException):
+        confirm_uninstalled(a.id, db, ADMIN)
+
+
+def test_offline_confirm_then_delete():
+    """离线机器收不到指令：管理员确认已在机器上停掉后才能删除。"""
+    db = _db()
+    a = _agent(db, last_heartbeat=datetime.now() - timedelta(minutes=10), status="offline")
+    request_uninstall(a.id, db, ADMIN)
+    confirm_uninstalled(a.id, db, ADMIN)
+    db.refresh(a)
+    assert a.uninstalled_at is not None
+    delete_agent(a.id, db, ADMIN)
+    assert db.get(BuildAgent, a.id) is None

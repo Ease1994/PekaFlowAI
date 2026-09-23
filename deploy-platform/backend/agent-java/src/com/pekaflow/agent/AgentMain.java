@@ -121,6 +121,14 @@ public class AgentMain {
 
         System.out.println("[agent] 版本 " + config.version + "，家目录 " + config.home);
 
+        // 上次卸到一半被守护拉起：不再注册，把本机卸完就退出
+        if (Uninstaller.markerExists(config)) {
+            config.loadSavedToken();
+            Uninstaller.run(config, api);
+            System.exit(0);
+            return;
+        }
+
         // 1. 注册：首次要带 --enroll-token，之后凭落盘的 token 续期
         config.loadSavedToken();
         register(api, config);
@@ -128,6 +136,8 @@ public class AgentMain {
         // 平台下发的目标版本：非空表示该升级了，主循环会停止领新任务并排空
         final java.util.concurrent.atomic.AtomicReference<String> upgradeTo =
                 new java.util.concurrent.atomic.AtomicReference<>(null);
+        final java.util.concurrent.atomic.AtomicBoolean uninstallRequested =
+                new java.util.concurrent.atomic.AtomicBoolean(false);
         final long[] nextUpgradeAttempt = {0L};
         // 升级失败的原因，随心跳报给平台，页面上能直接看到卡在哪一步
         final java.util.concurrent.atomic.AtomicReference<String> upgradeError =
@@ -170,12 +180,19 @@ public class AgentMain {
                         System.out.println("[agent] 已更新轮换的接入 key");
                     }
                     applyAllowPathsPolicy(config, resp);
+                    if (Json.bool(resp.get("should_uninstall"))) {
+                        if (uninstallRequested.compareAndSet(false, true)) {
+                            System.out.println("[agent] 收到卸载指令，当前任务跑完后卸掉本机守护");
+                            Uninstaller.writeMarker(config);
+                        }
+                    }
                     // 先把新 jar 下下来，成功了才让主循环停工。下载本身不影响在跑的任务，
                     // 这样"停了工却换不上新版"的窗口就不存在
                     boolean forced = Json.bool(resp.get("force_upgrade"));
                     // 自动重试有 5 分钟冷却，避免下载失败时每个心跳都拉一遍 jar。
                     // 管理员点「催升级」必须立刻再试：冷却是挡自动循环的，不是挡人。
                     if (Json.bool(resp.get("should_upgrade")) && upgradeTo.get() == null
+                            && !uninstallRequested.get()
                             && (!selfUpgradeBroken[0] || forced)
                             && (forced || System.currentTimeMillis() >= nextUpgradeAttempt[0])) {
                         String target = Json.str(resp.get("latest_version"));
@@ -209,7 +226,7 @@ public class AgentMain {
         // 槽满时阻塞最多 500ms 再回头看升级标志，避免 50ms 空转把生产机 CPU 打满，
         // 也不能无限 acquire——升级排空时必须能从这里醒过来。
         long idleMs = 200;
-        while (upgradeTo.get() == null) {
+        while (upgradeTo.get() == null && !uninstallRequested.get()) {
             try {
                 if (!slots.tryAcquire(500, TimeUnit.MILLISECONDS)) {
                     continue;
@@ -275,10 +292,16 @@ public class AgentMain {
         try {
             // 不设上限：宁可等一个跑不完的任务，也不能把正在发布的活给砍了
             while (!pool.awaitTermination(60, TimeUnit.SECONDS)) {
-                System.out.println("[agent] 还有 " + running.get() + " 个任务在跑，升级等待中…");
+                String why = uninstallRequested.get() ? "卸载" : "升级";
+                System.out.println("[agent] 还有 " + running.get() + " 个任务在跑，" + why + "等待中…");
             }
         } catch (InterruptedException ignored) {
             Thread.currentThread().interrupt();
+        }
+        if (uninstallRequested.get()) {
+            Uninstaller.run(config, api);
+            System.exit(0);
+            return;
         }
         System.out.println("[agent] 退出，等待守护进程换上 " + upgradeTo.get());
         System.exit(0);

@@ -216,6 +216,8 @@ def test_dangerous_ops_stay_admin() -> None:
     assert _route_level(agent_router, "/agents/enroll-token") == "user"
     assert _route_level(agent_router, "/agents/enroll-token/rotate", "POST") == "admin"
     assert _route_level(agent_router, "/agents/{agent_id}", "DELETE") == "admin"
+    assert _route_level(agent_router, "/agents/{agent_id}/uninstall", "POST") == "admin"
+    assert _route_level(agent_router, "/agents/{agent_id}/uninstall/confirm", "POST") == "admin"
     assert _route_level(store_router, "/store/plugins/upload", "POST") == "admin"
     assert _route_level(store_router, "/store/plugins/{plugin_id}/install", "POST") == "admin"
     assert _route_level(store_router, "/store/plugins/{plugin_id}/uninstall", "POST") == "admin"

@@ -22,6 +22,11 @@ def agent_is_online(agent: BuildAgent | None) -> bool:
     """
     if agent is None:
         return False
+    # 卸载中 / 已卸载的机器不能再领任务，否则会一边卸一边往上派活
+    if getattr(agent, "uninstalled_at", None) is not None:
+        return False
+    if getattr(agent, "uninstall_requested_at", None) is not None:
+        return False
     if (agent.status or "") != "online":
         return False
     hb = agent.last_heartbeat

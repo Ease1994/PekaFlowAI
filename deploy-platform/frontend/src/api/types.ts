@@ -267,6 +267,9 @@ export interface BuildAgent {
   upgrading?: boolean  // 版本落后但在线且没报错，即正在自动升级的路上
   upgrade_stalled?: boolean  // 版本落后却升不上去：报了错，或者掉线了
   upgrade_error?: string  // Agent 自报的失败原因（下载失败 / 守护进程没换上包……）
+  uninstall_requested?: boolean  // 已下发卸载，等 Agent 卸完或管理员确认
+  uninstalled?: boolean  // 机器上的 Agent 已卸掉
+  can_delete?: boolean  // 只有卸完才允许从名单删除
   groups?: { id: number; name: string }[]  // 所属节点组，下发权限授在组上
   // Linux 节点允许启停的服务，形如 systemd:nginx。真正的边界在节点本地的
   // sudoers 白名单上，这里只是 Agent 自报的、供页面对照
