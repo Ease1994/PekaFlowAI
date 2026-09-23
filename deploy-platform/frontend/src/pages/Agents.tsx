@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Card, Tag, Tooltip, Button, Space, Modal, Form, Input, Popconfirm, Radio, Select, message, Alert, Typography } from 'antd'
 import DataTable from '@/components/DataTable'
 import {
@@ -12,6 +12,7 @@ import {
   DownloadOutlined,
   ConsoleSqlOutlined,
   LoadingOutlined,
+  RedoOutlined,
 } from '@ant-design/icons'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { get, del, post, postR, patch, getBlob } from '@/api/client'
@@ -40,6 +41,8 @@ export default function Agents() {
   const queryClient = useQueryClient()
   const isAdmin = !!useAuthStore((s) => s.user?.is_admin)
   const [open, setOpen] = useState(false)
+  /** 卸完后再装：弹窗预填这一台，名称锁定，命令会接到原来那条登记上 */
+  const [reinstallTarget, setReinstallTarget] = useState<BuildAgent | null>(null)
   const [form] = Form.useForm()
   const [mode, setMode] = useState<RunMode>('script')
   // 命令区是在 Form 外面渲染的，表单改了不会自然带动它重算
@@ -100,20 +103,45 @@ export default function Agents() {
     message.success(res.message || t('agents.uninstallQueued'))
   }
 
-  const handleConfirmUninstalled = (r: BuildAgent) => {
-    Modal.confirm({
-      title: t('agents.confirmUninstalledTitle', { name: r.name }),
-      content: t('agents.confirmUninstalledBody'),
-      okText: t('agents.confirmUninstalled'),
-      okButtonProps: { danger: true },
-      cancelText: t('common.cancel'),
-      onOk: async () => {
-        await post(`/agents/${r.id}/uninstall/confirm`)
-        queryClient.invalidateQueries({ queryKey: ['agents', 'builder'] })
-        message.success(t('agents.uninstalledHint'))
-      },
-    })
+  /**
+   * 打开重新安装弹窗。名称和环境沿用原登记，到机器上跑命令后会清掉卸载状态重新上线。
+   */
+  const openReinstall = (r: BuildAgent) => {
+    setReinstallTarget(r)
+    setMode('script')
+    setOpen(true)
   }
+
+  const closeInstallModal = () => {
+    setOpen(false)
+    setReinstallTarget(null)
+  }
+
+  // destroyOnClose 后表单是新挂的，必须等弹窗打开再写入预填值
+  useEffect(() => {
+    if (!open || !reinstallTarget) {
+      return
+    }
+    let tags: string[] = []
+    try {
+      const parsed = JSON.parse(reinstallTarget.tags || '[]')
+      if (Array.isArray(parsed)) {
+        tags = parsed.map((x) => String(x)).filter(Boolean)
+      }
+    } catch {
+      tags = []
+    }
+    const os = reinstallTarget.os === 'windows' || reinstallTarget.os === 'macos' ? reinstallTarget.os : 'linux'
+    form.setFieldsValue({
+      name: reinstallTarget.name,
+      os,
+      env: reinstallTarget.env || 'prod',
+      tags,
+      workspace: '',
+      serverUrl: DEFAULT_SERVER_URL,
+    })
+    bumpForm((n) => n + 1)
+  }, [open, reinstallTarget, form])
 
   /** 版本落后时的按钮说明：卡住了要解释原因，升级中则说明会自己换。 */
   const upgradeHint = (r: BuildAgent) => {
@@ -183,6 +211,7 @@ export default function Agents() {
     const envArgs = envInstallArgs(v.env)
     const base = `java -jar deploy-agent.jar --server ${serverUrl} --name ${v.name}${tags ? ` --tags ${tags}` : ''}${wsArg}${envArgs.cli}${enrollArg}`
     const os = v.os || 'linux'
+    const reinstallNote = reinstallTarget ? t('agents.reinstallNote') + '\n' : ''
 
     if (mode === 'script') {
       // 脚本自己从平台下载 jar，不用先把 jar 和脚本传到机器上
@@ -196,7 +225,7 @@ export default function Agents() {
             `.\\install-agent.ps1 -Server ${serverUrl} -Name ${v.name}${tagArg}${envArgs.ps}` +
             `${workspace ? ` -Workspace "${workspace}"` : ''}` +
             `${enrollToken ? ` -EnrollToken ${enrollToken}` : ''}`,
-          note: t('agents.scriptNoteWin'),
+          note: reinstallNote + t('agents.scriptNoteWin'),
           os,
         }
       }
@@ -206,26 +235,26 @@ export default function Agents() {
           `SERVER=${serverUrl} ${shTags}${envArgs.shPrefix}NAME=${v.name}` +
           `${workspace ? ` WORKSPACE=${workspace}` : ''}` +
           `${enrollToken ? ` ENROLL_TOKEN=${enrollToken}` : ''} bash install-agent.sh`,
-        note: t('agents.scriptNoteUnix'),
+        note: reinstallNote + t('agents.scriptNoteUnix'),
         os,
       }
     }
 
     if (mode === 'foreground') {
-      return { cmd: base, note: t('agents.foregroundNote'), os }
+      return { cmd: base, note: reinstallNote + t('agents.foregroundNote'), os }
     }
 
     if (os === 'windows') {
       return {
         cmd: `start /B ${base} > agent.log 2>&1`,
-        note: t('agents.bgNoteWin'),
+        note: reinstallNote + t('agents.bgNoteWin'),
         os,
       }
     }
     // Linux / macOS（nohup 通用）
     return {
       cmd: `nohup ${base} > agent.log 2>&1 &\necho "${t('agents.bgEcho')}"`,
-      note: t('agents.bgNoteUnix'),
+      note: reinstallNote + t('agents.bgNoteUnix'),
       os,
     }
   }
@@ -344,6 +373,7 @@ export default function Agents() {
       render: (_: unknown, r: BuildAgent) =>
         isAdmin ? (
         <Space wrap>
+          {r.uninstalled ? null : (
           <Tooltip title={upgradeHint(r)}>
             <span>
               <Button
@@ -356,6 +386,7 @@ export default function Agents() {
               </Button>
             </span>
           </Tooltip>
+          )}
           {r.uninstalled ? null : (
             <Popconfirm
               title={t('agents.uninstallTitle', { name: r.name })}
@@ -370,9 +401,9 @@ export default function Agents() {
               </Button>
             </Popconfirm>
           )}
-          {r.uninstall_requested && !r.uninstalled ? (
-            <Button size="small" onClick={() => handleConfirmUninstalled(r)}>
-              {t('agents.confirmUninstalled')}
+          {r.uninstalled ? (
+            <Button size="small" icon={<RedoOutlined />} onClick={() => openReinstall(r)}>
+              {t('agents.reinstall')}
             </Button>
           ) : null}
           <Tooltip title={r.can_delete ? t('agents.uninstalledHint') : t('agents.deleteNeedUninstall')}>
@@ -401,7 +432,15 @@ export default function Agents() {
       <Card
         title={t('agents.title')}
         extra={
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => setOpen(true)}>
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={() => {
+              setReinstallTarget(null)
+              form.resetFields()
+              setOpen(true)
+            }}
+          >
             {t('agents.addAgent')}
           </Button>
         }
@@ -411,9 +450,13 @@ export default function Agents() {
 
       {/* 新增构建机弹窗 */}
       <Modal
-        title={t('agents.addAgent')}
+        title={
+          reinstallTarget
+            ? t('agents.reinstallTitle', { name: reinstallTarget.name })
+            : t('agents.addAgent')
+        }
         open={open}
-        onCancel={() => setOpen(false)}
+        onCancel={closeInstallModal}
         footer={null}
         width={720}
         destroyOnClose
@@ -457,11 +500,11 @@ export default function Agents() {
           onValuesChange={() => bumpForm((n) => n + 1)}
         >
           <Form.Item label={t('agents.nameLabel')} name="name" rules={[{ required: true }]}>
-            <Input placeholder={t('agents.namePh')} />
+            <Input placeholder={t('agents.namePh')} disabled={!!reinstallTarget} />
           </Form.Item>
 
           <Form.Item label={t('agents.osLabel')} name="os" rules={[{ required: true }]}>
-            <Radio.Group>
+            <Radio.Group disabled={!!reinstallTarget}>
               <Radio value="linux">🐧 Linux</Radio>
               <Radio value="windows">🪟 Windows</Radio>
               <Radio value="macos">🍎 macOS</Radio>
@@ -473,7 +516,7 @@ export default function Agents() {
             name="env"
             extra={t('agents.envExtra')}
           >
-            <Select options={envOptions()} />
+            <Select options={envOptions()} disabled={!!reinstallTarget} />
           </Form.Item>
 
           <Form.Item label={t('agents.tagsLabel')} name="tags">
