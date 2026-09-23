@@ -30,6 +30,7 @@ import {
   EditOutlined,
   LoadingOutlined,
   PlusOutlined,
+  RedoOutlined,
   ReloadOutlined,
   UploadOutlined,
 } from '@ant-design/icons'
@@ -402,7 +403,9 @@ export default function Nodes() {
     const envNote = skipNodePushApproval(envArgs.value)
       ? '\n' + t('nodes.noteSkipApproval', { env: envLabel(envArgs.value) })
       : '\n' + t('nodes.noteNeedApproval', { env: envLabel(envArgs.value) })
-    const rerunNote = editingNode ? '\n' + t('nodes.rerunNote') : ''
+    const rerunNote = !editingNode
+      ? ''
+      : '\n' + (editingNode.uninstalled ? t('nodes.reinstallNote') : t('nodes.rerunNote'))
     // 只在用户写明时带进安装命令；空着让脚本推导 release-backup，不能当成整盘可写
     const backupRoot = String(v.backupRoot || '').trim()
 
@@ -472,7 +475,11 @@ export default function Nodes() {
     }
     await copyText(
       result.cmd,
-      editingNode ? t('nodes.copiedRerun') : t('nodes.copiedInstall'),
+      editingNode?.uninstalled
+        ? t('nodes.copiedInstall')
+        : editingNode
+          ? t('nodes.copiedRerun')
+          : t('nodes.copiedInstall'),
     )
   }
 
@@ -708,9 +715,12 @@ export default function Nodes() {
       render: (_: unknown, r: BuildAgent) =>
         isAdmin ? (
         <Space wrap>
+          {r.uninstalled ? null : (
           <Button size="small" icon={<EditOutlined />} onClick={() => openEdit(r)}>
             {t('nodes.modify')}
           </Button>
+          )}
+          {r.uninstalled ? null : (
           <Tooltip title={upgradeHint(r)}>
             <span>
               <Button
@@ -723,6 +733,7 @@ export default function Nodes() {
               </Button>
             </span>
           </Tooltip>
+          )}
           {r.uninstalled ? null : (
             <Popconfirm
               title={t('nodes.uninstallTitle', { name: r.name })}
@@ -740,6 +751,11 @@ export default function Nodes() {
           {r.uninstall_requested && !r.uninstalled ? (
             <Button size="small" onClick={() => handleConfirmUninstalled(r)}>
               {t('nodes.confirmUninstalled')}
+            </Button>
+          ) : null}
+          {r.uninstalled ? (
+            <Button size="small" icon={<RedoOutlined />} onClick={() => openEdit(r)}>
+              {t('nodes.reinstall')}
             </Button>
           ) : null}
           <Tooltip title={r.can_delete ? t('nodes.uninstalledHint') : t('nodes.deleteNeedUninstall')}>
@@ -1039,14 +1055,28 @@ export default function Nodes() {
       </Modal>
 
       <Modal
-        title={editingNode ? t('nodes.editNodeTitle', { name: editingNode.name }) : t('nodes.addNode')}
+        title={
+          editingNode?.uninstalled
+            ? t('nodes.reinstallTitle', { name: editingNode.name })
+            : editingNode
+              ? t('nodes.editNodeTitle', { name: editingNode.name })
+              : t('nodes.addNode')
+        }
         open={open}
         onCancel={closeNodeModal}
         footer={null}
         width={760}
         destroyOnClose
       >
-        {editingNode && (editingNode.effective_status !== 'online' || editingNode.upgrade_stalled) ? (
+        {editingNode?.uninstalled ? (
+          <Alert
+            type="info"
+            showIcon
+            message={t('nodes.reinstall')}
+            description={t('nodes.reinstallNote')}
+            style={{ marginBottom: 16 }}
+          />
+        ) : editingNode && (editingNode.effective_status !== 'online' || editingNode.upgrade_stalled) ? (
           <Alert
             type="error"
             showIcon
@@ -1297,7 +1327,11 @@ export default function Nodes() {
             </Button>
           ) : null}
           <Button type={editingNode ? 'default' : 'primary'} icon={<CopyOutlined />} onClick={copyCommand}>
-            {editingNode ? t('nodes.copyRerun') : t('nodes.copyCmd')}
+            {editingNode?.uninstalled
+              ? t('nodes.reinstall')
+              : editingNode
+                ? t('nodes.copyRerun')
+                : t('nodes.copyCmd')}
           </Button>
           <Button icon={<CopyOutlined />} onClick={copyEnrollToken}>
             {t('nodes.copyEnroll')}

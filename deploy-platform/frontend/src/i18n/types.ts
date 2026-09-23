@@ -1261,6 +1261,10 @@ export type Messages = {
     uninstallQueued: string
     uninstallOffline: string
     deleteNeedUninstall: string
+    /** 卸完后把同一条登记再装回机器 */
+    reinstall: string
+    reinstallTitle: string
+    reinstallNote: string
     title: string
     addAgent: string
     jarAlertTitle: string
@@ -1697,6 +1701,10 @@ export type Messages = {
     uninstallQueued: string
     uninstallOffline: string
     deleteNeedUninstall: string
+    /** 卸完后把同一条登记再装回机器 */
+    reinstall: string
+    reinstallTitle: string
+    reinstallNote: string
     noteSkipApproval: string
     noteNeedApproval: string
     rerunNote: string

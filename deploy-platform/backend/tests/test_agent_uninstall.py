@@ -17,11 +17,13 @@ from app.modules.agent.router import (
     confirm_uninstalled,
     delete_agent,
     heartbeat,
+    register_agent,
     request_uninstall,
 )
 from app.modules.agent.tokens import hash_agent_token
 from app.modules.audit.models import AuditLog
 from app.modules.auth.models import Permission
+from app.modules.settings.models import PlatformSetting
 
 ADMIN = CurrentUser(id=1, username="admin", is_admin=True)
 PLAIN = "a" * 64
@@ -31,7 +33,13 @@ def _db() -> Session:
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(
         engine,
-        tables=[BuildAgent.__table__, NodeGroupMember.__table__, AuditLog.__table__, Permission.__table__],
+        tables=[
+            BuildAgent.__table__,
+            NodeGroupMember.__table__,
+            AuditLog.__table__,
+            Permission.__table__,
+            PlatformSetting.__table__,
+        ],
     )
     return Session(engine)
 
@@ -135,3 +143,30 @@ def test_heartbeat_after_uninstalled_does_not_refresh_presence():
     assert a.uninstalled_at == stamped
     assert a.last_heartbeat == last
     assert _effective_status(a) == "uninstalled"
+
+
+def test_reinstall_with_enroll_token_clears_uninstall():
+    """卸完后带接入凭证重装：接到原来那条登记，清掉卸载状态，重新上线。"""
+    db = _db()
+    db.add(PlatformSetting(key="agent_enroll_token", value="enroll-secret"))
+    db.commit()
+    a = _agent(db)
+    agent_id = a.id
+    request_uninstall(a.id, db, ADMIN)
+    heartbeat(a.id, db, x_agent_token=PLAIN, payload={"uninstalled": True})
+    db.refresh(a)
+    assert a.uninstalled_at is not None
+
+    resp = register_agent(
+        {"name": a.name, "role": "builder", "host": "172.17.3.164", "os": "windows"},
+        db,
+        x_enroll_token="enroll-secret",
+        x_agent_token="",
+    )
+    db.refresh(a)
+    assert a.id == agent_id
+    assert a.uninstalled_at is None
+    assert a.uninstall_requested_at is None
+    assert _effective_status(a) == "online"
+    assert resp.data["agent_id"] == agent_id
+
