@@ -122,9 +122,9 @@ curl -fsSL -H "X-Enroll-Token: ${ENROLL_TOKEN}" -o deploy-agent.jar \
     || { echo "下载 jar 失败：请确认平台地址可达、接入凭证正确（凭证轮换后要用新的）"; exit 1; }
 verify_agent_jar deploy-agent.jar
 echo "      $(ls -lh deploy-agent.jar | awk '{print $5}')  deploy-agent.jar"
-# 清掉上一轮自升级的残留：留着 .new 的话，systemd 下次启动会把它换上去，
-# 刚下的这份新 jar 反而被顶掉——重装完版本却退回去了，没人想得通
-rm -f deploy-agent.jar.new deploy-agent.jar.bak deploy-agent.upgrade-attempt
+# 清掉上次留下的换包文件和卸载标记。重装就是再装一次：
+# 留着 .new 会把刚下的 jar 顶掉；留着 uninstall.requested 会让守护一启动又把 Agent 卸掉。
+rm -f deploy-agent.jar.new deploy-agent.jar.bak deploy-agent.upgrade-attempt uninstall.requested
 
 echo "[3/4] 启动"
 # --home 显式指定：systemd 拉起时的用户可能和现在不同，user.home 一变登记凭据就找不着了

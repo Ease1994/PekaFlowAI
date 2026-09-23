@@ -684,12 +684,31 @@ def heartbeat(
     x_agent_token: str = Header(default=""),
     payload: dict | None = Body(default=None),
 ):
-    """Agent 心跳；顺带回传是否需要自升级。
+    """Agent 心跳；顺带回传是否需要自升级或卸载。
 
-    body 可含 running_count / concurrency / version。
+    body 可含 running_count / concurrency / version / uninstalled。
+    卸完之后的 ping 不再刷新在线状态。没点过卸载的 uninstalled 自报会被忽略。
     """
     body = payload or {}
     a = _authenticate_agent(db, agent_id, x_agent_token)
+    reported_uninstalled = body.get("uninstalled") is True or str(
+        body.get("uninstalled") or ""
+    ).lower() in ("1", "true")
+    # 已经卸完后还可能有进程在 ping。不当成在线，也不刷新心跳时间，
+    # 否则「确认已卸载」会一直认为机器还活着。
+    if a.uninstalled_at is not None:
+        return R.ok(
+            {
+                "running_count": body.get("running_count"),
+                "concurrency": body.get("concurrency"),
+                "latest_version": current_jar_version(),
+                "should_upgrade": False,
+                "force_upgrade": False,
+                "should_uninstall": False,
+                "new_token": None,
+                "allow_paths": _stored_str_list(a.allow_paths),
+            }
+        )
     a.status = "online"
     a.last_heartbeat = datetime.now()
     # 定期轮换鉴权 key：到期换发新 token，随心跳回给 Agent，它落盘后无感知切换
@@ -705,10 +724,9 @@ def heartbeat(
     err = str(body.get("upgrade_error") or "").strip()[:500]
     if err != (a.upgrade_error or ""):
         a.upgrade_error = err
-    # Agent 卸完本机守护后最后一次心跳带 uninstalled=true
-    if body.get("uninstalled") is True or str(body.get("uninstalled") or "").lower() in ("1", "true"):
-        if a.uninstalled_at is None:
-            a.uninstalled_at = datetime.now()
+    # 只有管理员下过卸载，才接受 Agent 自报卸完。没点卸载不能把自己变成可删除。
+    if reported_uninstalled and a.uninstall_requested_at is not None and a.uninstalled_at is None:
+        a.uninstalled_at = datetime.now()
         a.status = "offline"
     db.commit()
 

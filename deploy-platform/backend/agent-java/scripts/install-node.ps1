@@ -216,9 +216,9 @@ if ($got -ne $expect.ToLower()) {
     throw "jar 指纹不一致（本地 $got，平台 $expect），已删除，请重试安装"
 }
 Write-Host ("      {0:N0} KB  deploy-agent.jar" -f ((Get-Item deploy-agent.jar).Length / 1KB))
-# 清掉上一轮自升级的残留。留着 .new 的话，守护进程下次拉起时会把它换上去，
-# 我们刚下的这份新 jar 反而被顶掉——重装完版本却退回去了，没人想得通
-Remove-Item deploy-agent.jar.new, deploy-agent.jar.bak, deploy-agent.upgrade-attempt `
+# 清掉上次留下的换包文件和卸载标记。重装就是再装一次：
+# 留着 .new 会把刚下的 jar 顶掉；留着 uninstall.requested 会让守护一启动又把 Agent 卸掉。
+Remove-Item deploy-agent.jar.new, deploy-agent.jar.bak, deploy-agent.upgrade-attempt, uninstall.requested `
     -Force -ErrorAction SilentlyContinue
 
 Write-Host '[3/5] 生成启动器与守护脚本'

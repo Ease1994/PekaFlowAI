@@ -160,7 +160,7 @@ public class AgentMain {
 
         // 2. 心跳线程（上报当前运行数，顺带取回升级指令）
         Thread heartbeat = new Thread(() -> {
-            while (true) {
+            while (!Uninstaller.shouldStopHeartbeat()) {
                 try {
                     Map<String, Object> hb = new HashMap<>();
                     hb.put("running_count", running.get());

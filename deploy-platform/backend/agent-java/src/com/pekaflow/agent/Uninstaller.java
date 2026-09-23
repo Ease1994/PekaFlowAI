@@ -24,6 +24,19 @@ public final class Uninstaller {
     /** 工作目录里的卸载标记。守护若在卸完前把进程拉起来，入口看到它就不再注册。 */
     static final String MARKER_NAME = "uninstall.requested";
 
+    /**
+     * 卸载一旦开始，心跳线程必须退出。
+     *
+     * 挂起的进程如果还按 10 秒一次上报，平台会认为机器仍在线，
+     * 「确认已卸载」会被挡住，名单卡在卸载中。
+     */
+    private static volatile boolean stopHeartbeat;
+
+    /** 心跳循环用来判断该不该退出。 */
+    static boolean shouldStopHeartbeat() {
+        return stopHeartbeat;
+    }
+
     /** 标记文件路径：和 jar 放在同一目录。 */
     static File markerFile(Config config) {
         File jar = Config.selfJar();
@@ -76,6 +89,7 @@ public final class Uninstaller {
      * @param api 用来向平台报 uninstalled；token 缺失时只做本机清理
      */
     static void run(Config config, ApiClient api) {
+        stopHeartbeat = true;
         System.out.println("[agent] 开始卸载本机 Agent");
         writeMarker(config);
         if (config.agentId <= 0) {
