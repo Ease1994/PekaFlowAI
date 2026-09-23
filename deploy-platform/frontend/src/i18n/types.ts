@@ -1249,6 +1249,18 @@ export type Messages = {
     upgrading: string
     deleteTitle: string
     deleteDesc: string
+    uninstall: string
+    uninstallTitle: string
+    uninstallBody: string
+    uninstalling: string
+    uninstalled: string
+    uninstalledHint: string
+    confirmUninstalled: string
+    confirmUninstalledTitle: string
+    confirmUninstalledBody: string
+    uninstallQueued: string
+    uninstallOffline: string
+    deleteNeedUninstall: string
     title: string
     addAgent: string
     jarAlertTitle: string
@@ -1673,6 +1685,18 @@ export type Messages = {
     removeBody: string
     remove: string
     removed: string
+    uninstall: string
+    uninstallTitle: string
+    uninstallBody: string
+    uninstalling: string
+    uninstalled: string
+    uninstalledHint: string
+    confirmUninstalled: string
+    confirmUninstalledTitle: string
+    confirmUninstalledBody: string
+    uninstallQueued: string
+    uninstallOffline: string
+    deleteNeedUninstall: string
     noteSkipApproval: string
     noteNeedApproval: string
     rerunNote: string

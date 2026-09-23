@@ -448,6 +448,9 @@ if [ -n "$ALLOW_SERVICES" ]; then
             *) die "不支持的服务类型「${stype}」，只能是 systemd 或 docker" ;;
         esac
     done
+    echo "${RUN_USER} ALL=(root) NOPASSWD: ${SYSTEMCTL} stop ${SERVICE_NAME}" >> "$TMP_SUDO"
+    echo "${RUN_USER} ALL=(root) NOPASSWD: ${SYSTEMCTL} disable ${SERVICE_NAME}" >> "$TMP_SUDO"
+    echo "${RUN_USER} ALL=(root) NOPASSWD: ${SYSTEMCTL} disable --now ${SERVICE_NAME}" >> "$TMP_SUDO"
     # 先校验再落盘：一个语法错误的 sudoers 会让整台机器的 sudo 都不能用，
     # 那是运维事故，不是安装失败
     visudo -cqf "$TMP_SUDO" || { rm -f "$TMP_SUDO"; die "生成的 sudoers 语法校验不通过，已放弃写入"; }
@@ -455,9 +458,17 @@ if [ -n "$ALLOW_SERVICES" ]; then
     rm -f "$TMP_SUDO"
     echo "      允许控制：${ALLOW_SERVICES_ARG}"
 else
-    # 这次没配就把上次的清掉，否则「我明明去掉了」但权限还在
-    rm -f "$SUDOERS_FILE"
-    echo "      未配置 ALLOW_SERVICES，服务启停步骤会被拒绝（只传文件的话正常）"
+    TMP_SUDO="$(mktemp)"
+    {
+        echo "# RELEASE 部署节点：页面卸载时允许停掉本机 Agent，不含其它服务"
+        echo "${RUN_USER} ALL=(root) NOPASSWD: ${SYSTEMCTL} stop ${SERVICE_NAME}"
+        echo "${RUN_USER} ALL=(root) NOPASSWD: ${SYSTEMCTL} disable ${SERVICE_NAME}"
+        echo "${RUN_USER} ALL=(root) NOPASSWD: ${SYSTEMCTL} disable --now ${SERVICE_NAME}"
+    } > "$TMP_SUDO"
+    visudo -cqf "$TMP_SUDO" || { rm -f "$TMP_SUDO"; die "生成的 sudoers 语法校验不通过，已放弃写入"; }
+    install -m 0440 -o root -g root "$TMP_SUDO" "$SUDOERS_FILE"
+    rm -f "$TMP_SUDO"
+    echo "      未配置 ALLOW_SERVICES，服务启停步骤会被拒绝；已放行本机 Agent 卸载"
 fi
 
 # ---------- jar ----------
@@ -486,6 +497,11 @@ shift 2
 JAR="$WD/deploy-agent.jar"
 NEW="$WD/deploy-agent.jar.new"
 BAK="$WD/deploy-agent.jar.bak"
+
+if [ -f "$WD/uninstall.requested" ]; then
+    sudo -n systemctl disable --now rp-node >/dev/null 2>&1 || true
+    exit 0
+fi
 
 if [ -f "$NEW" ]; then
     if [ -f "$JAR" ]; then

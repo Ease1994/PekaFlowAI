@@ -26,6 +26,7 @@ import {
   DeleteOutlined,
   DesktopOutlined,
   DownloadOutlined,
+  DisconnectOutlined,
   EditOutlined,
   LoadingOutlined,
   PlusOutlined,
@@ -33,7 +34,7 @@ import {
   UploadOutlined,
 } from '@ant-design/icons'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { del, get, getBlob, patch, post, postForm } from '@/api/client'
+import { del, get, getBlob, patch, post, postForm, postR } from '@/api/client'
 import DataTable from '@/components/DataTable'
 import { copyText } from '@/utils/clipboard'
 import type { BuildAgent, NodeGroup } from '@/api/types'
@@ -351,6 +352,10 @@ export default function Nodes() {
   }
 
   const handleDelete = (node: BuildAgent) => {
+    if (!node.can_delete) {
+      message.warning(t('nodes.deleteNeedUninstall'))
+      return
+    }
     Modal.confirm({
       title: t('nodes.removeTitle', { name: node.name }),
       content: t('nodes.removeBody'),
@@ -361,6 +366,27 @@ export default function Nodes() {
         await del(`/agents/${node.id}`)
         refresh()
         message.success(t('nodes.removed'))
+      },
+    })
+  }
+
+  const handleUninstall = async (node: BuildAgent) => {
+    const res = await postR(`/agents/${node.id}/uninstall`)
+    refresh()
+    message.success(res.message || t('nodes.uninstallQueued'))
+  }
+
+  const handleConfirmUninstalled = (node: BuildAgent) => {
+    Modal.confirm({
+      title: t('nodes.confirmUninstalledTitle', { name: node.name }),
+      content: t('nodes.confirmUninstalledBody'),
+      okText: t('nodes.confirmUninstalled'),
+      okButtonProps: { danger: true },
+      cancelText: t('common.cancel'),
+      onOk: async () => {
+        await post(`/agents/${node.id}/uninstall/confirm`)
+        refresh()
+        message.success(t('nodes.uninstalledHint'))
       },
     })
   }
@@ -645,7 +671,10 @@ export default function Nodes() {
           : t('nodes.neverHeartbeat')
         return (
           <Space direction="vertical" size={0}>
-            {v === 'online' ? <Tag color="success">{t('nodes.online')}</Tag> : <Tag>{t('nodes.offline')}</Tag>}
+            {v === 'uninstalled' ? <Tag>{t('nodes.uninstalled')}</Tag>
+              : v === 'uninstalling' ? <Tag color="warning">{t('nodes.uninstalling')}</Tag>
+              : v === 'online' ? <Tag color="success">{t('nodes.online')}</Tag>
+              : <Tag>{t('nodes.offline')}</Tag>}
             <span style={{ fontSize: 11, color: '#999' }}>{t('nodes.heartbeatAt', { time: hb })}</span>
           </Space>
         )
@@ -675,18 +704,15 @@ export default function Nodes() {
     },
     {
       title: t('common.action'),
-      width: 230,
+      width: 320,
       render: (_: unknown, r: BuildAgent) =>
         isAdmin ? (
-        <Space>
+        <Space wrap>
           <Button size="small" icon={<EditOutlined />} onClick={() => openEdit(r)}>
             {t('nodes.modify')}
           </Button>
           <Tooltip title={upgradeHint(r)}>
-            {/* span 包一层：按钮 disabled 时不触发鼠标事件，Tooltip 就不显示了 */}
             <span>
-              {/* 不禁用「升级中」：自动升级卡住时（守护进程换不上包）按钮一禁，
-                  管理员就只能干等，连重试的入口都没有 */}
               <Button
                 size="small"
                 icon={r.upgrading ? <LoadingOutlined /> : <CloudUploadOutlined />}
@@ -697,9 +723,32 @@ export default function Nodes() {
               </Button>
             </span>
           </Tooltip>
-          <Button size="small" danger icon={<DeleteOutlined />} onClick={() => handleDelete(r)}>
-            {t('nodes.remove')}
-          </Button>
+          {r.uninstalled ? null : (
+            <Popconfirm
+              title={t('nodes.uninstallTitle', { name: r.name })}
+              description={t('nodes.uninstallBody')}
+              okText={t('nodes.uninstall')}
+              okButtonProps={{ danger: true }}
+              cancelText={t('common.cancel')}
+              onConfirm={() => handleUninstall(r)}
+            >
+              <Button size="small" danger icon={<DisconnectOutlined />} disabled={!!r.uninstall_requested}>
+                {r.uninstall_requested ? t('nodes.uninstalling') : t('nodes.uninstall')}
+              </Button>
+            </Popconfirm>
+          )}
+          {r.uninstall_requested && !r.uninstalled ? (
+            <Button size="small" onClick={() => handleConfirmUninstalled(r)}>
+              {t('nodes.confirmUninstalled')}
+            </Button>
+          ) : null}
+          <Tooltip title={r.can_delete ? t('nodes.uninstalledHint') : t('nodes.deleteNeedUninstall')}>
+            <span>
+              <Button size="small" danger icon={<DeleteOutlined />} disabled={!r.can_delete} onClick={() => handleDelete(r)}>
+                {t('nodes.remove')}
+              </Button>
+            </span>
+          </Tooltip>
         </Space>
         ) : null,
     },

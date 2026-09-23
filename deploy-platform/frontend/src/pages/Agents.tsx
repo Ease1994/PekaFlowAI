@@ -5,6 +5,7 @@ import {
   CloudServerOutlined,
   CloudUploadOutlined,
   DeleteOutlined,
+  DisconnectOutlined,
   PlusOutlined,
   CopyOutlined,
   ReloadOutlined,
@@ -13,7 +14,7 @@ import {
   LoadingOutlined,
 } from '@ant-design/icons'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { get, del, post, patch, getBlob } from '@/api/client'
+import { get, del, post, postR, patch, getBlob } from '@/api/client'
 import { copyText } from '@/utils/clipboard'
 import type { BuildAgent } from '@/api/types'
 import { envInstallArgs, envLabel, envOptions, envSelectOptions } from '@/env'
@@ -91,6 +92,27 @@ export default function Agents() {
   const handleDelete = async (id: number) => {
     await del(`/agents/${id}`)
     queryClient.invalidateQueries({ queryKey: ['agents', 'builder'] })
+  }
+
+  const handleUninstall = async (r: BuildAgent) => {
+    const res = await postR(`/agents/${r.id}/uninstall`)
+    queryClient.invalidateQueries({ queryKey: ['agents', 'builder'] })
+    message.success(res.message || t('agents.uninstallQueued'))
+  }
+
+  const handleConfirmUninstalled = (r: BuildAgent) => {
+    Modal.confirm({
+      title: t('agents.confirmUninstalledTitle', { name: r.name }),
+      content: t('agents.confirmUninstalledBody'),
+      okText: t('agents.confirmUninstalled'),
+      okButtonProps: { danger: true },
+      cancelText: t('common.cancel'),
+      onOk: async () => {
+        await post(`/agents/${r.id}/uninstall/confirm`)
+        queryClient.invalidateQueries({ queryKey: ['agents', 'builder'] })
+        message.success(t('agents.uninstalledHint'))
+      },
+    })
   }
 
   /** 版本落后时的按钮说明：卡住了要解释原因，升级中则说明会自己换。 */
@@ -267,7 +289,11 @@ export default function Agents() {
       dataIndex: 'effective_status',
       render: (v: string, r: BuildAgent) => {
         // 后端 effective_status 已根据 last_heartbeat 推算：online 但超时 → offline
-        const tag = v === 'online' ? <Tag color="success">{t('agents.online')}</Tag> : <Tag>{t('agents.offline')}</Tag>
+        const tag =
+          v === 'uninstalled' ? <Tag>{t('agents.uninstalled')}</Tag>
+          : v === 'uninstalling' ? <Tag color="warning">{t('agents.uninstalling')}</Tag>
+          : v === 'online' ? <Tag color="success">{t('agents.online')}</Tag>
+          : <Tag>{t('agents.offline')}</Tag>
         const hb = r.last_heartbeat
           ? formatDateTime(r.last_heartbeat)
           : t('agents.neverHeartbeat')
@@ -314,7 +340,7 @@ export default function Agents() {
     },
     {
       title: t('common.action'),
-      width: 180,
+      width: 280,
       render: (_: unknown, r: BuildAgent) =>
         isAdmin ? (
         <Space wrap>
@@ -330,18 +356,41 @@ export default function Agents() {
               </Button>
             </span>
           </Tooltip>
-          <Popconfirm
-            title={t('agents.deleteTitle', { name: r.name })}
-            description={t('agents.deleteDesc')}
-            okText={t('common.delete')}
-            okButtonProps={{ danger: true }}
-            cancelText={t('common.cancel')}
-            onConfirm={() => handleDelete(r.id)}
-          >
-            <Button size="small" danger icon={<DeleteOutlined />}>
-              {t('common.delete')}
+          {r.uninstalled ? null : (
+            <Popconfirm
+              title={t('agents.uninstallTitle', { name: r.name })}
+              description={t('agents.uninstallBody')}
+              okText={t('agents.uninstall')}
+              okButtonProps={{ danger: true }}
+              cancelText={t('common.cancel')}
+              onConfirm={() => handleUninstall(r)}
+            >
+              <Button size="small" danger icon={<DisconnectOutlined />} disabled={!!r.uninstall_requested}>
+                {r.uninstall_requested ? t('agents.uninstalling') : t('agents.uninstall')}
+              </Button>
+            </Popconfirm>
+          )}
+          {r.uninstall_requested && !r.uninstalled ? (
+            <Button size="small" onClick={() => handleConfirmUninstalled(r)}>
+              {t('agents.confirmUninstalled')}
             </Button>
-          </Popconfirm>
+          ) : null}
+          <Tooltip title={r.can_delete ? t('agents.uninstalledHint') : t('agents.deleteNeedUninstall')}>
+            <span>
+              <Popconfirm
+                title={t('agents.deleteTitle', { name: r.name })}
+                description={t('agents.deleteDesc')}
+                okText={t('common.delete')}
+                okButtonProps={{ danger: true }}
+                cancelText={t('common.cancel')}
+                onConfirm={() => handleDelete(r.id)}
+              >
+                <Button size="small" danger icon={<DeleteOutlined />} disabled={!r.can_delete}>
+                  {t('common.delete')}
+                </Button>
+              </Popconfirm>
+            </span>
+          </Tooltip>
         </Space>
         ) : null,
     },

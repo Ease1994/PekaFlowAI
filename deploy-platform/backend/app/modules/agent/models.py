@@ -53,6 +53,11 @@ class BuildAgent(Base, TimestampMixin):
     # Agent 自报的升级失败原因。升级横跨「平台下发 → Agent 下载 → 守护进程换包」三段，
     # 中间两段都在平台视野之外，不让 Agent 说一声，页面上就只能一直转圈
     upgrade_error: Mapped[str] = mapped_column(String(500), default="")
+    # 管理员点了「卸载」的时刻。Agent 下个心跳会收到 should_uninstall，
+    # 停掉本机守护并删掉登记凭据。没卸完之前不能从名单删除。
+    uninstall_requested_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Agent 上报卸完，或管理员确认已在机器上手动卸掉。有值才允许删除登记。
+    uninstalled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     # 历史列，不再读写。JDK / Maven 安装目录写在对应插件步骤里。
     tool_homes: Mapped[str] = mapped_column(Text, default="{}")
 

@@ -101,10 +101,14 @@ def _authenticate_agent_task(db: Session, agent_id: int, task_id: int) -> BuildT
 
 
 def _effective_status(agent: BuildAgent) -> str:
-    """列表和接口用的展示状态，与派发任务时的在线判定同一套规则。
+    """列表和接口用的展示状态。
 
-    DB 里只存最后一次心跳的状态，避免每次 list 都写库；后台巡检会定期把超时的写回 offline。
+    卸载中 / 已卸载优先于在线判定：卸完前不能当在线机器派任务，也不能直接删除。
     """
+    if agent.uninstalled_at is not None:
+        return "uninstalled"
+    if agent.uninstall_requested_at is not None:
+        return "uninstalling"
     return "online" if agent_is_online(agent) else "offline"
 
 
@@ -199,6 +203,9 @@ def _to_dict(a: BuildAgent) -> dict:
         d["outdated"] and d["effective_status"] == "online" and not d["upgrade_error"]
     )
     d["upgrade_stalled"] = d["outdated"] and not d["upgrading"]
+    d["uninstall_requested"] = a.uninstall_requested_at is not None and a.uninstalled_at is None
+    d["uninstalled"] = a.uninstalled_at is not None
+    d["can_delete"] = a.uninstalled_at is not None
     return d
 
 
@@ -631,6 +638,11 @@ def register_agent(
         # 重新注册意味着刚换过 jar（或人工重装），升级指令使命已尽
         existing.upgrade_requested = False
         existing.upgrade_requested_at = None
+        # 重新跑安装脚本（持接入凭证）视为再安装：清掉卸载状态。
+        # 仅凭落盘 token 续期不能清，否则卸到一半被守护拉起就又变成「已安装」。
+        if not renewing:
+            existing.uninstall_requested_at = None
+            existing.uninstalled_at = None
         if not existing.token:
             issued_plain = secrets.token_hex(32)
             existing.token = hash_agent_token(issued_plain)
@@ -693,18 +705,25 @@ def heartbeat(
     err = str(body.get("upgrade_error") or "").strip()[:500]
     if err != (a.upgrade_error or ""):
         a.upgrade_error = err
+    # Agent 卸完本机守护后最后一次心跳带 uninstalled=true
+    if body.get("uninstalled") is True or str(body.get("uninstalled") or "").lower() in ("1", "true"):
+        if a.uninstalled_at is None:
+            a.uninstalled_at = datetime.now()
+        a.status = "offline"
     db.commit()
 
     latest = current_jar_version()
+    uninstalling = a.uninstall_requested_at is not None and a.uninstalled_at is None
     # 管理员手动点过「重试」：让 Agent 越过它自己设的失败熔断再试一次
-    forced = _upgrade_in_flight(a)
+    forced = False if uninstalling else _upgrade_in_flight(a)
     return R.ok(
         {
             "running_count": body.get("running_count"),
             "concurrency": body.get("concurrency"),
             "latest_version": latest,
-            "should_upgrade": _should_upgrade(a, latest, forced),
+            "should_upgrade": False if uninstalling else _should_upgrade(a, latest, forced),
             "force_upgrade": forced,
+            "should_uninstall": uninstalling,
             "new_token": rotated,  # 非空表示 key 轮换了，Agent 需更新本地凭据
             # 节点允许目录以平台为准，随心跳推给正在跑的 Agent，不必重装
             "allow_paths": _stored_str_list(a.allow_paths),
@@ -771,6 +790,8 @@ def request_upgrade(agent_id: int, db: Session = Depends(get_db), _: CurrentUser
     a = db.get(BuildAgent, agent_id)
     if a is None:
         raise BizException.not_found("构建机")
+    if a.uninstalled_at is not None or a.uninstall_requested_at is not None:
+        raise BizException.bad_request("这台机器正在卸载或已经卸完，不能再催升级")
     latest = current_jar_version()
     if not latest:
         raise BizException.bad_request("平台没有可用的 Agent jar，无法升级")
@@ -869,13 +890,102 @@ def update_agent(
     return R.ok(_to_dict(a))
 
 
-@router.delete("/agents/{agent_id}", summary="删除构建机")
+@router.post("/agents/{agent_id}/uninstall", summary="下发卸载：Agent 停掉本机守护后才能删除登记")
+def request_uninstall(
+    agent_id: int,
+    db: Session = Depends(get_db),
+    current: CurrentUser = Depends(get_current_admin),
+):
+    """通知 Agent 卸掉本机计划任务 / systemd 和登记凭据。
+
+    不删平台名单。卸完（心跳上报或管理员确认）之后才能 DELETE。
+    站点目录、备份、自定义工作空间不会动。
+    """
+    a = db.get(BuildAgent, agent_id)
+    if a is None:
+        raise BizException.not_found("构建机")
+    if a.uninstalled_at is not None:
+        raise BizException.bad_request("已经卸完，请点删除把登记从名单去掉")
+    if a.uninstall_requested_at is None:
+        a.uninstall_requested_at = datetime.now()
+        from app.modules.audit.service import write as write_audit
+
+        kind = "节点" if (a.role or "") == "node" else "构建机"
+        write_audit(
+            db,
+            "agent.uninstall.request",
+            "agent",
+            a.id,
+            f"下发卸载：{kind} {a.name}",
+            user_id=current.id,
+            username=current.username,
+        )
+        db.commit()
+        db.refresh(a)
+    recently = a.last_heartbeat is not None and (
+        datetime.now() - a.last_heartbeat
+    ).total_seconds() <= HEARTBEAT_TIMEOUT_SECONDS
+    msg = (
+        "已下发卸载，Agent 会在当前任务跑完后卸掉本机守护"
+        if recently
+        else "已记录卸载。机器离线收不到指令，上线后会自动卸；或先在机器上手动停掉再点「确认已卸载」"
+    )
+    return R.ok(_to_dict(a), message=msg)
+
+
+@router.post("/agents/{agent_id}/uninstall/confirm", summary="确认已在机器上卸掉（离线/旧版）")
+def confirm_uninstalled(
+    agent_id: int,
+    db: Session = Depends(get_db),
+    current: CurrentUser = Depends(get_current_admin),
+):
+    """离线或旧版 Agent 收不到远程卸载时，管理员确认机器上已经停掉后再允许删除。
+
+    仍在心跳的机器不能确认：那会把还在跑的 Agent 当已卸掉，名单一删它又会重新注册。
+    """
+    a = db.get(BuildAgent, agent_id)
+    if a is None:
+        raise BizException.not_found("构建机")
+    if a.uninstalled_at is not None:
+        return R.ok(_to_dict(a), message="已经是已卸载")
+    recently = a.last_heartbeat is not None and (
+        datetime.now() - a.last_heartbeat
+    ).total_seconds() <= HEARTBEAT_TIMEOUT_SECONDS
+    if recently and a.uninstalled_at is None:
+        raise BizException.bad_request(
+            "机器仍在心跳，不能确认已卸载。请等远程卸载完成，或先到机器上停掉 Agent"
+        )
+    a.uninstall_requested_at = a.uninstall_requested_at or datetime.now()
+    a.uninstalled_at = datetime.now()
+    a.status = "offline"
+    from app.modules.audit.service import write as write_audit
+
+    kind = "节点" if (a.role or "") == "node" else "构建机"
+    write_audit(
+        db,
+        "agent.uninstall.confirm",
+        "agent",
+        a.id,
+        f"确认已卸载：{kind} {a.name}",
+        user_id=current.id,
+        username=current.username,
+    )
+    db.commit()
+    db.refresh(a)
+    return R.ok(_to_dict(a), message="已标记为卸载完成，可以删除登记")
+
+
+@router.delete("/agents/{agent_id}", summary="删除已卸载的构建机 / 节点登记")
 def delete_agent(agent_id: int, db: Session = Depends(get_db), _: CurrentUser = Depends(get_current_admin)):
     from app.modules.auth.models import Permission
 
     a = db.get(BuildAgent, agent_id)
     if a is None:
         raise BizException.not_found("构建机")
+    if a.uninstalled_at is None:
+        raise BizException.bad_request(
+            "请先卸载。机器上的 Agent 卸完（或确认已在机器上停掉）之后才能删除登记"
+        )
     # 机器没了，挂在它身上的分组关系和授权也得跟着走。留着的话，下一台机器
     # 复用到同一个自增 id 时会凭空继承上一台的授权
     db.query(NodeGroupMember).filter(NodeGroupMember.agent_id == agent_id).delete()

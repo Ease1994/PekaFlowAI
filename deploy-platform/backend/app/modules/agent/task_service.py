@@ -534,6 +534,8 @@ def fetch_task(db: Session, agent_id: int) -> BuildTask | None:
     agent = db.get(BuildAgent, agent_id)
     if agent is None:
         raise BizException.not_found("构建机")
+    if agent.uninstalled_at is not None or agent.uninstall_requested_at is not None:
+        return None
 
     try:
         agent_tags = set(json.loads(agent.tags or "[]"))

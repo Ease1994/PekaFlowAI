@@ -179,8 +179,9 @@ Wants=network-online.target
 Type=simple
 # 服务进程默认 PATH 不含 /opt/maven、/snap/bin。交互登录能用的 mvn/docker，systemd 里找不到。
 Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/maven/bin:/usr/share/maven/bin:/opt/gradle/bin:/snap/bin
+# 卸载标记在：停掉自己并让本次启动失败。disable 成功后 unit 不再自启。
 # 换上 .new 前先留 .bak：新 jar 起不来时还能退回，避免构建机被坏包卡死离线
-ExecStartPre=/bin/sh -c 'if [ -f ${WORK_DIR}/deploy-agent.jar.new ]; then if [ -f ${WORK_DIR}/deploy-agent.jar ]; then cp -f ${WORK_DIR}/deploy-agent.jar ${WORK_DIR}/deploy-agent.jar.bak; fi; mv -f ${WORK_DIR}/deploy-agent.jar.new ${WORK_DIR}/deploy-agent.jar; fi'
+ExecStartPre=/bin/sh -c 'if [ -f ${WORK_DIR}/uninstall.requested ]; then systemctl disable --now release-agent; false; fi; if [ -f ${WORK_DIR}/deploy-agent.jar.new ]; then if [ -f ${WORK_DIR}/deploy-agent.jar ]; then cp -f ${WORK_DIR}/deploy-agent.jar ${WORK_DIR}/deploy-agent.jar.bak; fi; mv -f ${WORK_DIR}/deploy-agent.jar.new ${WORK_DIR}/deploy-agent.jar; fi'
 ExecStart=$(command -v java)${quoted}
 Restart=always
 RestartSec=10
