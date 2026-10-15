@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { Card, Form, Input, Select, Button, message, Divider, Alert, Tag, Upload, Space } from 'antd'
+import { Card, Form, Input, Select, Button, message, Divider, Alert, Tag, Upload, Space, Modal, Tooltip } from 'antd'
 import {
   SaveOutlined,
   DatabaseOutlined,
@@ -10,6 +10,8 @@ import {
   UploadOutlined,
   DeleteOutlined,
   SafetyCertificateOutlined,
+  DownloadOutlined,
+  ImportOutlined,
 } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { del, get, post, postForm, put } from '@/api/client'
@@ -83,6 +85,98 @@ interface Settings {
 /** 出厂显示名；表单空值回填用。旧出厂名在 isFactoryProductName 里兼容。 */
 const FACTORY_PRODUCT_NAME = 'PekaFlowAI'
 
+/** 与后端 EXPORT_KIND 一致。对不上就不是本页导出的文件。 */
+const SETTINGS_EXPORT_KIND = 'pekaflow.platform-settings'
+/** 与后端 EXPORT_VERSION 一致。不认识的版本拒绝导入。 */
+const SETTINGS_EXPORT_VERSION = 1
+/** 与后端 MAX_IMPORT_BYTES 一致。超过就不是运营配置。 */
+const SETTINGS_IMPORT_MAX_BYTES = 256 * 1024
+
+/** 平台配置导出文件。settings 的值在文件里是文本，也接受整数和布尔。 */
+interface SettingsExport {
+  /** 固定为 pekaflow.platform-settings */
+  kind: string
+  /** 当前只认 1 */
+  version: number
+  /** 导出时间，导入时忽略 */
+  exported_at?: string
+  /** 要覆盖的运营配置。没出现的键保持原值。 */
+  settings: Record<string, string | number | boolean>
+}
+
+/** 导入结果。imported_count 是实际写入的项数，不含被丢掉的未知键。 */
+interface SettingsImportResult {
+  /** 实际写入的配置项数量 */
+  imported_count: number
+}
+
+/**
+ * 确认文件是本页导出的运营配置。
+ * 空对象、种类不对、值不是文本/整数/布尔都拒绝，避免把别的 JSON 送去覆盖线上配置。
+ */
+function assertImportFile(payload: unknown): asserts payload is SettingsExport {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw new Error('invalid')
+  }
+  const doc = payload as SettingsExport
+  if (doc.kind !== SETTINGS_EXPORT_KIND || doc.version !== SETTINGS_EXPORT_VERSION) {
+    throw new Error('invalid')
+  }
+  const settings = doc.settings
+  if (!settings || typeof settings !== 'object' || Array.isArray(settings)) {
+    throw new Error('invalid')
+  }
+  const entries = Object.entries(settings)
+  if (entries.length === 0) {
+    throw new Error('empty')
+  }
+  for (const [, value] of entries) {
+    const scalar = typeof value === 'string' || typeof value === 'boolean' || Number.isInteger(value)
+    if (!scalar) {
+      throw new Error('invalid')
+    }
+  }
+}
+
+/** 读本地 JSON。超限或解析失败抛出 invalid / empty / too-large，由页面换成提示。 */
+function readSettingsFile(file: File): Promise<SettingsExport> {
+  return new Promise((resolve, reject) => {
+    if (file.size <= 0) {
+      reject(new Error('empty'))
+      return
+    }
+    if (file.size > SETTINGS_IMPORT_MAX_BYTES) {
+      reject(new Error('too-large'))
+      return
+    }
+    const reader = new FileReader()
+    reader.onload = () => {
+      try {
+        const parsed: unknown = JSON.parse(String(reader.result || ''))
+        assertImportFile(parsed)
+        resolve(parsed)
+      } catch (err) {
+        reject(err instanceof Error && err.message === 'empty' ? err : new Error('invalid'))
+      }
+    }
+    reader.onerror = () => reject(new Error('invalid'))
+    reader.readAsText(file)
+  })
+}
+
+/** 把导出结果下载成 JSON。文件名带本地日期，方便和备份放在一起认。 */
+function downloadSettingsFile(payload: SettingsExport) {
+  const blob = new Blob([`${JSON.stringify(payload, null, 2)}\n`], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  const now = new Date()
+  const pad = (n: number) => String(n).padStart(2, '0')
+  a.href = url
+  a.download = `pekaflow-platform-settings-${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}.json`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
 export default function Settings() {
   const t = useT()
   const queryClient = useQueryClient()
@@ -154,6 +248,58 @@ export default function Settings() {
     },
   })
 
+  const exportMutation = useMutation({
+    mutationFn: () => get<SettingsExport>('/settings/export'),
+  })
+
+  const importMutation = useMutation({
+    mutationFn: (payload: SettingsExport) => post<SettingsImportResult>('/settings/import', payload),
+  })
+
+  // 导出的是已保存、当前生效的配置，不是表单里还没点保存的草稿。
+  const confirmExport = () => {
+    Modal.confirm({
+      title: t('settings.exportConfirmTitle'),
+      content: t('settings.exportConfirmBody'),
+      okText: t('settings.exportOk'),
+      cancelText: t('common.cancel'),
+      onOk: async () => {
+        const payload = await exportMutation.mutateAsync()
+        downloadSettingsFile(payload)
+        message.success(t('settings.exportDone'))
+      },
+    })
+  }
+
+  // 先在浏览器里核对文件，确认后再覆盖。服务端仍会再校验一次，空文件不会改库。
+  const startImport = async (file: File) => {
+    let payload: SettingsExport
+    try {
+      payload = await readSettingsFile(file)
+    } catch (err) {
+      const code = err instanceof Error ? err.message : 'invalid'
+      const key = code === 'empty'
+        ? 'settings.importEmpty'
+        : code === 'too-large'
+          ? 'settings.importTooLarge'
+          : 'settings.importInvalid'
+      message.error(t(key))
+      return
+    }
+    Modal.confirm({
+      title: t('settings.importConfirmTitle'),
+      content: t('settings.importConfirmBody'),
+      okText: t('settings.importOk'),
+      okButtonProps: { danger: true },
+      cancelText: t('common.cancel'),
+      onOk: async () => {
+        const result = await importMutation.mutateAsync(payload)
+        message.success(t('settings.importDone', { n: result.imported_count }))
+        refreshHeader()
+      },
+    })
+  }
+
   const ldapTest = useMutation({
     mutationFn: () => post<{ ok: boolean; user_found?: boolean; user?: { username: string; email: string } }>('/account/ldap/test', {}),
     onSuccess: (r) => {
@@ -187,6 +333,33 @@ export default function Settings() {
         message={t('settings.alertTitle')}
         description={t('settings.alertDesc')}
         style={{ marginBottom: 16 }}
+        action={
+          <Space>
+            <Tooltip title={t('settings.exportTip')}>
+              <Button
+                icon={<DownloadOutlined />}
+                loading={exportMutation.isPending}
+                onClick={confirmExport}
+              >
+                {t('settings.exportConfig')}
+              </Button>
+            </Tooltip>
+            <Tooltip title={t('settings.importTip')}>
+              <Upload
+                accept=".json,application/json"
+                showUploadList={false}
+                beforeUpload={(file) => {
+                  void startImport(file)
+                  return false
+                }}
+              >
+                <Button icon={<ImportOutlined />} loading={importMutation.isPending}>
+                  {t('settings.importConfig')}
+                </Button>
+              </Upload>
+            </Tooltip>
+          </Space>
+        }
       />
 
       <Card
