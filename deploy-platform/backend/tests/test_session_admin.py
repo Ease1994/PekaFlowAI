@@ -7,11 +7,17 @@ from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from app.core.deps import get_current_admin, get_current_user, verify_token
+from app.core.deps import (
+    get_current_admin,
+    get_current_admin_session,
+    get_current_user,
+    require_live_admin,
+    verify_token,
+)
 from app.core.response import BizException
-from app.core.security import create_access_token
+from app.core.security import create_access_token, hash_api_token
 from app.db.base import Base
-from app.modules.auth.models import User
+from app.modules.auth.models import ApiToken, User
 
 
 def _db() -> Session:
@@ -91,3 +97,68 @@ def test_disabled_user_rejected_even_with_valid_jwt() -> None:
         assert exc.code == 401
         assert "禁用" in exc.message
     assert verify_token(token, db) is None
+
+
+def test_settings_transfer_allows_only_live_admin_session() -> None:
+    """导入导出只放行登录会话里的在职管理员。API Token、非管理员、降权都拒绝。"""
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine, tables=[User.__table__, ApiToken.__table__])
+    db = Session(engine)
+    admin = _user(db, is_admin=True)
+    token = create_access_token(admin.id, admin.username, is_admin=True)
+    session_user = get_current_user(_request(), _creds(token), db)
+    assert session_user.via_api_token is False
+    assert get_current_admin_session(session_user).id == admin.id
+    require_live_admin(db, session_user)
+
+    raw = "qx_settings_transfer_must_fail"
+    db.add(
+        ApiToken(
+            user_id=admin.id,
+            name="ci",
+            token_hash=hash_api_token(raw),
+            revoked=False,
+        )
+    )
+    db.commit()
+    api_user = get_current_user(_request(), _creds(raw), db)
+    assert api_user.is_admin is True
+    assert api_user.via_api_token is True
+    try:
+        get_current_admin_session(api_user)
+        raise AssertionError("管理员的 API Token 也不能导入导出")
+    except BizException as exc:
+        assert exc.code == 403
+        assert "API Token" in exc.message
+
+    staff = User(
+        username="staff",
+        display_name="普通用户",
+        email="staff@mail.test",
+        password_hash="x",
+        is_admin=False,
+        source="local",
+        status="active",
+    )
+    db.add(staff)
+    db.commit()
+    db.refresh(staff)
+    staff_user = get_current_user(
+        _request(),
+        _creds(create_access_token(staff.id, staff.username, is_admin=True)),
+        db,
+    )
+    try:
+        get_current_admin_session(staff_user)
+        raise AssertionError("非管理员不能导入导出")
+    except BizException as exc:
+        assert exc.code == 403
+
+    admin.is_admin = False
+    db.commit()
+    try:
+        require_live_admin(db, session_user)
+        raise AssertionError("降权后不能继续导出")
+    except BizException as exc:
+        assert exc.code == 403
+    db.close()

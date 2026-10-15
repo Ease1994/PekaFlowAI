@@ -48,8 +48,8 @@ ADMIN_ROUTE_PATHS = ("releases", "settings", "users")
 OPEN_ROUTE_PATHS = ("artifacts", "agents", "nodes", "skills", "credentials", "models", "ai", "permissions", "handbook")
 
 
-def _dep_level(route) -> str | None:
-    """admin 优先：get_current_admin 内部也会挂 get_current_user。"""
+def _dep_names(route) -> list[str]:
+    """收集这条路由挂上的依赖函数名，含嵌套的 get_current_user。"""
     names: list[str] = []
 
     def walk(dep) -> None:
@@ -60,7 +60,13 @@ def _dep_level(route) -> str | None:
             walk(child)
 
     walk(route.dependant)
-    if "get_current_admin" in names:
+    return names
+
+
+def _dep_level(route) -> str | None:
+    """admin 优先：管理员依赖内部也会挂 get_current_user。"""
+    names = _dep_names(route)
+    if "get_current_admin" in names or "get_current_admin_session" in names:
         return "admin"
     if "get_current_user" in names:
         return "user"
@@ -226,6 +232,16 @@ def test_dangerous_ops_stay_admin() -> None:
     assert _route_level(metric_router, "/metrics/dora") == "admin"
     assert _route_level(account_router, "/account/users") == "admin"
     assert _route_level(settings_router, "/settings") == "admin"
+    assert _route_level(settings_router, "/settings/export", "GET") == "admin"
+    assert _route_level(settings_router, "/settings/import", "POST") == "admin"
+    # 导入导出比普通管理接口更严：必须是登录会话，不能只挂 get_current_admin。
+    for path, method in (("/settings/export", "GET"), ("/settings/import", "POST")):
+        route = next(
+            r
+            for r in settings_router.routes
+            if getattr(r, "path", None) == path and method in (getattr(r, "methods", None) or set())
+        )
+        assert "get_current_admin_session" in _dep_names(route)
     assert _route_level(permission_router, "/permissions") == "admin"
     assert _route_level(permission_router, "/menus", "PUT") == "admin"
     assert _route_level(permission_router, "/menus/users/{user_id}", "PUT") == "admin"
