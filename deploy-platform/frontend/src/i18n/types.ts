@@ -1121,6 +1121,22 @@ export type Messages = {
     smtpPassword: string
     smtpPasswordPh: string
     saveConfig: string
+    exportConfig: string
+    importConfig: string
+    exportTip: string
+    importTip: string
+    exportConfirmTitle: string
+    exportConfirmBody: string
+    exportOk: string
+    exportDone: string
+    exportFailed: string
+    importConfirmTitle: string
+    importConfirmBody: string
+    importOk: string
+    importDone: string
+    importInvalid: string
+    importEmpty: string
+    importTooLarge: string
     current: string
     tagLogs: string
     tagEs: string
