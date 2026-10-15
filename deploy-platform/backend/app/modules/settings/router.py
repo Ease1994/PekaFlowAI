@@ -8,12 +8,12 @@ from __future__ import annotations
 
 import json
 
-from fastapi import APIRouter, Depends, File, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Request, Response, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.core.config import database_display, settings as boot
-from app.core.deps import CurrentUser, get_current_admin
+from app.core.deps import CurrentUser, get_current_admin, get_current_admin_session, require_live_admin
 from app.core.response import BizException, R
 from app.db.session import get_db
 from app.modules.audit.service import write as write_audit
@@ -84,12 +84,19 @@ def _with_header(db: Session, data: dict) -> dict:
     return data
 
 
-@router.get("/export", summary="导出平台配置（仅管理员）")
+@router.get("/export", summary="导出平台配置（仅登录中的管理员）")
 def export_platform_settings(
+    response: Response,
     db: Session = Depends(get_db),
-    user: CurrentUser = Depends(get_current_admin),
+    user: CurrentUser = Depends(get_current_admin_session),
 ):
-    """下载当前生效的运营配置。文件含密码和接入凭证，审计只记项数，不记值。"""
+    """下载当前生效的运营配置。文件含密码和接入凭证。
+
+    只接受登录会话里的在职管理员。响应禁止缓存。审计只记项数，不记值。
+    """
+    require_live_admin(db, user)
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Pragma"] = "no-cache"
     payload = export_document(db)
     write_audit(
         db,
@@ -103,17 +110,18 @@ def export_platform_settings(
     return R.ok(payload)
 
 
-@router.post("/import", summary="导入平台配置（仅管理员）")
+@router.post("/import", summary="导入平台配置（仅登录中的管理员）")
 async def import_platform_settings(
     request: Request,
     db: Session = Depends(get_db),
-    user: CurrentUser = Depends(get_current_admin),
+    user: CurrentUser = Depends(get_current_admin_session),
 ):
     """用本页导出的 JSON 覆盖其中写明的项。空文件或格式不对时不改任何配置。
 
-    先看原始字节，超限直接拒绝，避免把超大正文解析进内存后再丢弃。
-    审计只记写入了哪些键，不记密码和密钥。
+    先确认仍是在职管理员，再看原始字节。超限直接拒绝，避免把超大正文解析进内存后再丢弃。
+    审计只记写入了哪些键，不记密码和密钥。响应也不回传整份配置。
     """
+    require_live_admin(db, user)
     raw = await request.body()
     if len(raw) > MAX_IMPORT_BYTES:
         raise BizException.bad_request("配置文件过大，已拒绝导入")
@@ -123,14 +131,13 @@ async def import_platform_settings(
         payload = json.loads(raw.decode("utf-8-sig"))
     except (UnicodeDecodeError, json.JSONDecodeError):
         raise BizException.bad_request("配置文件格式不正确")
-    data, count = import_settings(
+    _applied, count = import_settings(
         db,
         payload,
         user_id=user.id,
         username=user.username,
     )
-    data = _with_header(db, data)
-    return R.ok({"imported_count": count, "settings": data}, message="配置已导入")
+    return R.ok({"imported_count": count}, message="配置已导入")
 
 
 @router.put("", summary="更新平台配置（仅管理员）")

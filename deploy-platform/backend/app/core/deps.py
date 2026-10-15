@@ -18,11 +18,16 @@ bearer_scheme = HTTPBearer(auto_error=False)
 
 @dataclass
 class CurrentUser:
-    """当前登录用户上下文。"""
+    """当前登录用户上下文。
+
+    is_admin 以数据库为准，不认 JWT 里的旧标记。
+    via_api_token 为真表示这次请求用的是脚本令牌，不是登录会话。
+    """
 
     id: int
     username: str
     is_admin: bool = False
+    via_api_token: bool = False
 
 
 def _current_from_row(u: User) -> CurrentUser:
@@ -77,6 +82,7 @@ def get_current_user(
         if u is None:
             raise BizException.unauthorized("API Token 关联用户不存在")
         user = _current_from_row(u)
+        user.via_api_token = True
         _bind_audit(request, user, via_api_token=True)
         return user
 
@@ -583,6 +589,30 @@ def get_current_admin(user: CurrentUser = Depends(get_current_user)) -> CurrentU
     if not user.is_admin:
         raise BizException.forbidden("仅管理员可执行此操作")
     return user
+
+
+def get_current_admin_session(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
+    """平台配置导入导出：必须是库里的在职管理员，并且是登录会话。
+
+    管理员身份在 get_current_user 里按数据库重读，不认 JWT 上的旧标记。
+    未完成双因子的短时票和日志票也在那里拒绝。
+    API Token 即使属于管理员也不能下载或覆盖这份配置，避免脚本令牌泄漏后把密码和接入凭证整包带走。
+    """
+    if not user.is_admin:
+        raise BizException.forbidden("仅管理员可执行此操作")
+    if user.via_api_token:
+        raise BizException.forbidden("导入导出只能由管理员在登录后的页面里操作，不能使用 API Token")
+    return user
+
+
+def require_live_admin(db: Session, user: CurrentUser) -> None:
+    """用本次写库的会话再确认一次账号仍是在职管理员。
+
+    鉴权和业务不共用同一个会话。降权或禁用若刚提交，这里必须拦住，不能继续读出密码或覆盖配置。
+    """
+    row = db.get(User, user.id)
+    if row is None or (row.status or "active") != "active" or not row.is_admin:
+        raise BizException.forbidden("仅管理员可执行此操作")
 
 
 def sees_menu(db: Session, user: CurrentUser, *keys: str) -> bool:
